@@ -219,7 +219,7 @@ std::optional<models::DeviceEnrollment> CompanionApiClient::enroll(
     body << "{"
          << "\"username\":" << jsonString(username) << ","
          << "\"password\":" << jsonString(password) << ","
-         << "\"device_id\":" << jsonString(identity.deviceId) << ","
+         << "\"device_key\":" << jsonString(identity.deviceId) << ","
          << "\"hostname\":" << jsonString(identity.hostname) << ","
          << "\"label\":" << jsonString(identity.deviceLabel) << ","
          << "\"platform\":" << jsonString(identity.platform) << ","
