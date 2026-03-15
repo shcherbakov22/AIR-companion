@@ -16,8 +16,8 @@ enum class DeviceCommandType {
 struct DeviceCommand {
     std::string id;
     DeviceCommandType type{DeviceCommandType::Unknown};
+    std::string status;
     std::string payloadJson;
 };
 
 }  // namespace companion::models
-

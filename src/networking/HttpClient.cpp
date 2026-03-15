@@ -10,6 +10,8 @@
 #endif
 
 #include <optional>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 
 namespace companion::networking {
@@ -187,6 +189,21 @@ HttpResponse sendRequest(const std::wstring& method,
     return response;
 }
 
+std::string readFileBytes(const std::string& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        return {};
+    }
+
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    return buffer.str();
+}
+
+std::string basenameFromPath(const std::string& path) {
+    return std::filesystem::path(path).filename().string();
+}
+
 #endif
 
 }  // namespace
@@ -206,6 +223,46 @@ HttpResponse HttpClient::post(const std::string& url,
     return sendRequest(L"POST", url, headers, body);
 #else
     return HttpResponse{200, "{\"stub\":true,\"url\":\"" + url + "\",\"body\":\"" + body + "\"}"};
+#endif
+}
+
+HttpResponse HttpClient::postMultipart(const std::string& url,
+                                       const std::map<std::string, std::string>& headers,
+                                       const std::map<std::string, std::string>& fields,
+                                       const std::string& fileFieldName,
+                                       const std::string& filePath,
+                                       const std::string& contentType) const {
+#ifdef _WIN32
+    const auto fileBytes = readFileBytes(filePath);
+    if (fileBytes.empty()) {
+        return {0, {}};
+    }
+
+    const std::string boundary = "----AIRCompanionBoundary7MA4YWxkTrZu0gW";
+    std::ostringstream body;
+    for (const auto& [name, value] : fields) {
+        body << "--" << boundary << "\r\n"
+             << "Content-Disposition: form-data; name=\"" << name << "\"\r\n\r\n"
+             << value << "\r\n";
+    }
+
+    body << "--" << boundary << "\r\n"
+         << "Content-Disposition: form-data; name=\"" << fileFieldName << "\"; filename=\"" << basenameFromPath(filePath) << "\"\r\n"
+         << "Content-Type: " << contentType << "\r\n\r\n"
+         << fileBytes
+         << "\r\n--" << boundary << "--\r\n";
+
+    auto multipartHeaders = headers;
+    multipartHeaders["Content-Type"] = "multipart/form-data; boundary=" + boundary;
+    return sendRequest(L"POST", url, multipartHeaders, body.str());
+#else
+    (void)url;
+    (void)headers;
+    (void)fields;
+    (void)fileFieldName;
+    (void)filePath;
+    (void)contentType;
+    return {200, "{}"};
 #endif
 }
 

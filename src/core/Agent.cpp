@@ -54,19 +54,45 @@ void Agent::tick() {
 
     for (const auto& command : m_commandPoller.poll()) {
         m_commandPoller.acknowledge(command.id);
-        m_enforcementCoordinator.applyCommand(command);
-        m_commandPoller.submitResult(command.id, true, "stub");
+        bool success = true;
+        std::string output = "completed";
+
+        switch (command.type) {
+            case models::DeviceCommandType::RequestScreenshot: {
+                const auto path = m_screenCaptureAdapter.captureToFile("captures/screen");
+                success = path.has_value() && m_uplinkSync.uploadScreenCapture(*path, snapshot);
+                output = success ? "screen capture uploaded" : "screen capture failed";
+                break;
+            }
+            case models::DeviceCommandType::RequestCameraCapture: {
+                const auto path = m_cameraCaptureAdapter.captureToFile("captures/camera");
+                success = path.has_value() && m_uplinkSync.uploadCameraCapture(*path, snapshot);
+                output = success ? "camera capture uploaded" : "camera capture failed";
+                break;
+            }
+            default:
+                m_enforcementCoordinator.applyCommand(command);
+                break;
+        }
+
+        m_commandPoller.submitResult(command.id, success, output);
     }
 
     const auto now = std::chrono::steady_clock::now();
     if (m_captureScheduler.shouldCaptureScreen(now)) {
-        (void)m_screenCaptureAdapter.captureToFile("captures/screen");
-        m_captureScheduler.markScreenCaptured(now);
+        const auto path = m_screenCaptureAdapter.captureToFile("captures/screen");
+        if (path.has_value()) {
+            (void)m_uplinkSync.uploadScreenCapture(*path, snapshot);
+            m_captureScheduler.markScreenCaptured(now);
+        }
     }
 
     if (m_captureScheduler.shouldCaptureCamera(now)) {
-        (void)m_cameraCaptureAdapter.captureToFile("captures/camera");
-        m_captureScheduler.markCameraCaptured(now);
+        const auto path = m_cameraCaptureAdapter.captureToFile("captures/camera");
+        if (path.has_value()) {
+            (void)m_uplinkSync.uploadCameraCapture(*path, snapshot);
+            m_captureScheduler.markCameraCaptured(now);
+        }
     }
 
     m_status += " | " + m_uplinkSync.statusSummary();

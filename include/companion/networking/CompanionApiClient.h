@@ -37,6 +37,12 @@ public:
         const models::ActivitySnapshot& snapshot,
         const std::string& networkState) const;
     bool sendActivity(const std::string& deviceToken, const models::ActivitySnapshot& snapshot) const;
+    bool uploadScreenCapture(const std::string& deviceToken,
+                             const std::string& filePath,
+                             const models::ActivitySnapshot& snapshot) const;
+    bool uploadCameraCapture(const std::string& deviceToken,
+                             const std::string& filePath,
+                             const models::ActivitySnapshot& snapshot) const;
     const std::string& baseUrl() const;
 
 private:

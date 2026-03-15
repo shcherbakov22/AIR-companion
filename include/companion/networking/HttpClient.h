@@ -16,7 +16,12 @@ public:
     HttpResponse post(const std::string& url,
                       const std::map<std::string, std::string>& headers,
                       const std::string& body) const;
+    HttpResponse postMultipart(const std::string& url,
+                               const std::map<std::string, std::string>& headers,
+                               const std::map<std::string, std::string>& fields,
+                               const std::string& fileFieldName,
+                               const std::string& filePath,
+                               const std::string& contentType) const;
 };
 
 }  // namespace companion::networking
-

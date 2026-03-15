@@ -176,6 +176,25 @@ std::optional<int> jsonIntValue(const std::string& body, const std::string& key)
     return std::stoi(body.substr(numberStart, numberEnd - numberStart));
 }
 
+models::DeviceCommandType parseCommandType(const std::string& type) {
+    if (type == "refresh_policy") {
+        return models::DeviceCommandType::RefreshPolicy;
+    }
+    if (type == "request_screenshot") {
+        return models::DeviceCommandType::RequestScreenshot;
+    }
+    if (type == "request_camera_capture") {
+        return models::DeviceCommandType::RequestCameraCapture;
+    }
+    if (type == "lock_internet") {
+        return models::DeviceCommandType::LockInternet;
+    }
+    if (type == "unlock_internet") {
+        return models::DeviceCommandType::UnlockInternet;
+    }
+    return models::DeviceCommandType::Unknown;
+}
+
 std::map<std::string, std::string> jsonHeaders(const std::string& deviceToken = {}) {
     std::map<std::string, std::string> headers{
         {"Accept", "application/json"},
@@ -295,19 +314,54 @@ std::optional<models::DevicePolicy> CompanionApiClient::fetchPolicy(const std::s
     return policy;
 }
 
-std::vector<models::DeviceCommand> CompanionApiClient::fetchCommands(const std::string&) const {
-    return {};
+std::vector<models::DeviceCommand> CompanionApiClient::fetchCommands(const std::string& deviceToken) const {
+    const auto response = m_httpClient.get(m_baseUrl + "/api/companion/commands/next", jsonHeaders(deviceToken));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+        return {};
+    }
+
+    const auto commandBody = jsonObjectString(response.body, "command");
+    if (!commandBody.has_value()) {
+        return {};
+    }
+
+    models::DeviceCommand command;
+    command.id = jsonStringValue(*commandBody, "id").value_or({});
+    command.status = jsonStringValue(*commandBody, "status").value_or({});
+    command.type = parseCommandType(jsonStringValue(*commandBody, "command_type").value_or({}));
+    command.payloadJson = jsonObjectString(*commandBody, "payload").value_or("{}");
+
+    if (command.id.empty()) {
+        return {};
+    }
+
+    return {command};
 }
 
-bool CompanionApiClient::acknowledgeCommand(const std::string&, const std::string&) const {
-    return true;
+bool CompanionApiClient::acknowledgeCommand(const std::string& deviceToken, const std::string& commandId) const {
+    const auto response = m_httpClient.post(
+        m_baseUrl + "/api/companion/commands/" + commandId + "/acknowledge",
+        jsonHeaders(deviceToken),
+        "{}"
+    );
+    return response.statusCode >= 200 && response.statusCode < 300;
 }
 
-bool CompanionApiClient::submitCommandResult(const std::string&,
-                                             const std::string&,
-                                             bool,
-                                             const std::string&) const {
-    return true;
+bool CompanionApiClient::submitCommandResult(const std::string& deviceToken,
+                                             const std::string& commandId,
+                                             bool success,
+                                             const std::string& output) const {
+    std::ostringstream body;
+    body << "{"
+         << "\"status\":\"" << (success ? "completed" : "failed") << "\","
+         << "\"payload\":{\"output\":" << jsonString(output) << "}}";
+
+    const auto response = m_httpClient.post(
+        m_baseUrl + "/api/companion/commands/" + commandId + "/result",
+        jsonHeaders(deviceToken),
+        body.str()
+    );
+    return response.statusCode >= 200 && response.statusCode < 300;
 }
 
 bool CompanionApiClient::sendHeartbeat(const std::string& deviceToken,
@@ -377,6 +431,46 @@ bool CompanionApiClient::sendActivity(const std::string& deviceToken, const mode
 
     return focusedResponse.statusCode >= 200 && focusedResponse.statusCode < 300
         && openAppsResponse.statusCode >= 200 && openAppsResponse.statusCode < 300;
+}
+
+bool CompanionApiClient::uploadScreenCapture(const std::string& deviceToken,
+                                             const std::string& filePath,
+                                             const models::ActivitySnapshot& snapshot) const {
+    const std::map<std::string, std::string> fields{
+        {"app_name", snapshot.focusedApp},
+        {"window_title", snapshot.focusedWindowTitle},
+        {"browser_domain", snapshot.activeBrowserDomain},
+    };
+
+    const auto response = m_httpClient.postMultipart(
+        m_baseUrl + "/api/companion/captures/screen",
+        jsonHeaders(deviceToken),
+        fields,
+        "capture",
+        filePath,
+        "image/png"
+    );
+    return response.statusCode >= 200 && response.statusCode < 300;
+}
+
+bool CompanionApiClient::uploadCameraCapture(const std::string& deviceToken,
+                                             const std::string& filePath,
+                                             const models::ActivitySnapshot& snapshot) const {
+    const std::map<std::string, std::string> fields{
+        {"app_name", snapshot.focusedApp},
+        {"window_title", snapshot.focusedWindowTitle},
+        {"browser_domain", snapshot.activeBrowserDomain},
+    };
+
+    const auto response = m_httpClient.postMultipart(
+        m_baseUrl + "/api/companion/captures/camera",
+        jsonHeaders(deviceToken),
+        fields,
+        "capture",
+        filePath,
+        "image/png"
+    );
+    return response.statusCode >= 200 && response.statusCode < 300;
 }
 
 const std::string& CompanionApiClient::baseUrl() const {
