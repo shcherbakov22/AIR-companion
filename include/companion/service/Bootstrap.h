@@ -5,6 +5,7 @@
 
 #include "companion/networking/CompanionApiClient.h"
 #include "companion/service/CompanionConfigStore.h"
+#include "companion/service/EnrollmentRequestStore.h"
 
 namespace companion::service {
 
@@ -25,8 +26,15 @@ private:
     static std::string defaultHostname();
     static std::string defaultDeviceLabel();
     static std::string randomDeviceKey();
+    std::optional<BootstrapResult> initializeFromCredentials(
+        const std::string& baseUrl,
+        const std::string& username,
+        const std::string& password,
+        const std::string& deviceLabel
+    ) const;
 
     CompanionConfigStore m_configStore;
+    EnrollmentRequestStore m_enrollmentRequestStore;
 };
 
 }  // namespace companion::service

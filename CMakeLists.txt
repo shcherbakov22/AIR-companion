@@ -25,6 +25,7 @@ set(COMPANION_CORE_SOURCES
     src/service/Bootstrap.cpp
     src/service/CaptureSettingsStore.cpp
     src/service/CompanionConfigStore.cpp
+    src/service/EnrollmentRequestStore.cpp
     src/service/ServiceHost.cpp
     src/tray/TrayApplication.cpp
 )

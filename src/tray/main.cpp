@@ -7,6 +7,7 @@
 #include "companion/networking/CompanionApiClient.h"
 #include "companion/service/Bootstrap.h"
 #include "companion/service/CaptureSettingsStore.h"
+#include "companion/service/EnrollmentRequestStore.h"
 #include "companion/tray/TrayApplication.h"
 
 #include <iostream>
@@ -15,7 +16,11 @@ int main() {
     companion::service::Bootstrap bootstrap;
     const auto bootstrapped = bootstrap.initialize();
     if (!bootstrapped.has_value()) {
-        std::cerr << "AIR Companion tray bootstrap failed. Set AIR_COMPANION_USERNAME and AIR_COMPANION_PASSWORD for first enrollment." << '\n';
+        companion::service::EnrollmentRequestStore enrollmentRequestStore;
+        const auto requestPath = enrollmentRequestStore.requestPath();
+        (void) enrollmentRequestStore.saveTemplate();
+        std::cerr << "AIR Companion tray bootstrap failed. Fill enrollment details in " << requestPath
+                  << " or set AIR_COMPANION_USERNAME and AIR_COMPANION_PASSWORD for first enrollment." << '\n';
         return 1;
     }
 

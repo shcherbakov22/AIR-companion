@@ -29,38 +29,32 @@ std::optional<BootstrapResult> Bootstrap::initialize() const {
         };
     }
 
+    if (const auto request = m_enrollmentRequestStore.load(); request.has_value()) {
+        if (const auto bootstrapped = initializeFromCredentials(
+            request->baseUrl,
+            request->username,
+            request->password,
+            request->deviceLabel.empty() ? defaultDeviceLabel() : request->deviceLabel
+        ); bootstrapped.has_value()) {
+            return bootstrapped;
+        }
+    }
+
     const auto baseUrl = envOrDefault("AIR_COMPANION_BASE_URL", "https://127.0.0.1");
     const auto username = envOrDefault("AIR_COMPANION_USERNAME");
     const auto password = envOrDefault("AIR_COMPANION_PASSWORD");
 
     if (username.empty() || password.empty()) {
+        (void) m_enrollmentRequestStore.saveTemplate();
         return std::nullopt;
     }
 
-    StoredCompanionConfig config;
-    config.baseUrl = baseUrl;
-    config.identity.deviceId = randomDeviceKey();
-    config.identity.hostname = defaultHostname();
-    config.identity.deviceLabel = envOrDefault("AIR_COMPANION_DEVICE_LABEL", defaultDeviceLabel());
-    config.identity.platform = "windows";
-    config.identity.appVersion = AIR_COMPANION_VERSION;
-    config.identity.studentUsername = username;
-
-    networking::CompanionApiClient apiClient(config.baseUrl);
-    const auto enrollment = apiClient.enroll(username, password, config.identity);
-    if (!enrollment.has_value()) {
-        return std::nullopt;
-    }
-
-    config.identity = enrollment->identity;
-    config.deviceToken = enrollment->deviceToken;
-    (void)m_configStore.save(config);
-
-    return BootstrapResult{
-        std::move(apiClient),
-        std::move(config),
-        "enrolled device with AIR",
-    };
+    return initializeFromCredentials(
+        baseUrl,
+        username,
+        password,
+        envOrDefault("AIR_COMPANION_DEVICE_LABEL", defaultDeviceLabel())
+    );
 }
 
 std::string Bootstrap::envOrDefault(const char* name, const std::string& fallback) {
@@ -87,6 +81,42 @@ std::string Bootstrap::randomDeviceKey() {
     std::ostringstream out;
     out << std::hex << distribution(generator) << distribution(generator);
     return out.str();
+}
+
+std::optional<BootstrapResult> Bootstrap::initializeFromCredentials(
+    const std::string& baseUrl,
+    const std::string& username,
+    const std::string& password,
+    const std::string& deviceLabel
+) const {
+    if (baseUrl.empty() || username.empty() || password.empty()) {
+        return std::nullopt;
+    }
+
+    StoredCompanionConfig config;
+    config.baseUrl = baseUrl;
+    config.identity.deviceId = randomDeviceKey();
+    config.identity.hostname = defaultHostname();
+    config.identity.deviceLabel = deviceLabel.empty() ? defaultDeviceLabel() : deviceLabel;
+    config.identity.platform = "windows";
+    config.identity.appVersion = AIR_COMPANION_VERSION;
+    config.identity.studentUsername = username;
+
+    networking::CompanionApiClient apiClient(config.baseUrl);
+    const auto enrollment = apiClient.enroll(username, password, config.identity);
+    if (!enrollment.has_value()) {
+        return std::nullopt;
+    }
+
+    config.identity = enrollment->identity;
+    config.deviceToken = enrollment->deviceToken;
+    (void) m_configStore.save(config);
+
+    return BootstrapResult{
+        std::move(apiClient),
+        std::move(config),
+        "enrolled device with AIR",
+    };
 }
 
 }  // namespace companion::service
