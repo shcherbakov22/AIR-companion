@@ -141,6 +141,13 @@ HttpResponse sendRequest(const std::wstring& method,
     LPVOID bodyData = body.empty() ? WINHTTP_NO_REQUEST_DATA : reinterpret_cast<LPVOID>(body.empty() ? nullptr : const_cast<char*>(body.data()));
     const auto bodySize = static_cast<DWORD>(body.size());
 
+    if (parsed->secure) {
+        DWORD securityFlags =
+            SECURITY_FLAG_IGNORE_UNKNOWN_CA |
+            SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+        WinHttpSetOption(request, WINHTTP_OPTION_SECURITY_FLAGS, &securityFlags, sizeof(securityFlags));
+    }
+
     const bool sent = WinHttpSendRequest(
         request,
         headerBlock.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headerBlock.c_str(),
