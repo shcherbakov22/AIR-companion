@@ -7,6 +7,7 @@
 #include "companion/adapters/ICameraCaptureAdapter.h"
 #include "companion/adapters/IEnforcementAdapter.h"
 #include "companion/adapters/IAppTrackerAdapter.h"
+#include "companion/adapters/INetworkConfigurationAdapter.h"
 #include "companion/adapters/IScreenCaptureAdapter.h"
 #include "companion/adapters/IServiceLifecycleAdapter.h"
 
@@ -47,6 +48,25 @@ public:
     bool install() override;
     bool start() override;
     bool stop() override;
+};
+
+class WindowsNetworkConfigurationAdapter final : public INetworkConfigurationAdapter {
+public:
+    models::NetworkIdentity currentIdentity() const override;
+    bool ensureAirGateway(const std::string& gatewayIpv4, const std::string& dnsIpv4) override;
+    bool restorePreviousConfiguration() override;
+    std::string describeState() const override;
+
+private:
+    mutable models::NetworkIdentity m_currentIdentity{
+        "192.168.11.240",
+        "00:11:22:33:44:55",
+        "192.168.11.1",
+        "Ethernet",
+        "192.168.11.1",
+        false,
+    };
+    std::string m_state{"network passthrough"};
 };
 
 }  // namespace companion::adapters::windows

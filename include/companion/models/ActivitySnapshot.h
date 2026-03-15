@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "companion/models/NetworkIdentity.h"
+
 namespace companion::models {
 
 struct ActivitySnapshot {
@@ -10,7 +12,7 @@ struct ActivitySnapshot {
     std::string focusedWindowTitle;
     std::string activeBrowserDomain;
     std::vector<std::string> openApps;
+    NetworkIdentity networkIdentity;
 };
 
 }  // namespace companion::models
-

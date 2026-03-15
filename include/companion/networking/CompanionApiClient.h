@@ -30,8 +30,13 @@ public:
                              bool success,
                              const std::string& output) const;
 
-    bool sendHeartbeat(const std::string& deviceToken, const models::ActivitySnapshot& snapshot) const;
+    bool sendHeartbeat(
+        const std::string& deviceToken,
+        const models::DeviceIdentity& identity,
+        const models::ActivitySnapshot& snapshot,
+        const std::string& networkState) const;
     bool sendActivity(const std::string& deviceToken, const models::ActivitySnapshot& snapshot) const;
+    const std::string& baseUrl() const;
 
 private:
     std::string m_baseUrl;
@@ -39,4 +44,3 @@ private:
 };
 
 }  // namespace companion::networking
-

@@ -13,19 +13,31 @@ int main() {
     companion::adapters::windows::WindowsScreenCaptureAdapter screenCaptureAdapter;
     companion::adapters::windows::WindowsCameraCaptureAdapter cameraCaptureAdapter;
     companion::adapters::windows::WindowsEnforcementAdapter enforcementAdapter;
+    companion::adapters::windows::WindowsNetworkConfigurationAdapter networkConfigurationAdapter;
 
     companion::networking::CompanionApiClient apiClient("https://127.0.0.1");
+    companion::models::DeviceIdentity identity{
+        "stub-device-id",
+        "student-pc",
+        "Student PC",
+        "windows",
+        AIR_COMPANION_VERSION,
+        "student",
+    };
     companion::core::PolicySync policySync(apiClient, "stub-device-token");
     companion::core::CommandPoller commandPoller(apiClient, "stub-device-token");
     companion::core::CaptureScheduler captureScheduler;
     companion::core::EnforcementCoordinator enforcementCoordinator(enforcementAdapter);
+    companion::core::UplinkSync uplinkSync(apiClient, "stub-device-token", identity, networkConfigurationAdapter);
     companion::core::Agent agent(
         std::move(policySync),
         std::move(commandPoller),
         std::move(captureScheduler),
         std::move(enforcementCoordinator),
+        std::move(uplinkSync),
         appTrackerAdapter,
         browserDomainAdapter,
+        networkConfigurationAdapter,
         screenCaptureAdapter,
         cameraCaptureAdapter
     );

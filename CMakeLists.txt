@@ -13,6 +13,7 @@ set(COMPANION_CORE_SOURCES
     src/adapters/windows/WindowsBrowserDomainAdapter.cpp
     src/adapters/windows/WindowsCameraCaptureAdapter.cpp
     src/adapters/windows/WindowsEnforcementAdapter.cpp
+    src/adapters/windows/WindowsNetworkConfigurationAdapter.cpp
     src/adapters/windows/WindowsScreenCaptureAdapter.cpp
     src/adapters/windows/WindowsServiceLifecycleAdapter.cpp
     src/core/Agent.cpp
@@ -20,6 +21,7 @@ set(COMPANION_CORE_SOURCES
     src/core/CommandPoller.cpp
     src/core/EnforcementCoordinator.cpp
     src/core/PolicySync.cpp
+    src/core/UplinkSync.cpp
     src/service/ServiceHost.cpp
     src/tray/TrayApplication.cpp
 )
