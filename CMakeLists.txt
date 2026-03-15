@@ -22,6 +22,8 @@ set(COMPANION_CORE_SOURCES
     src/core/EnforcementCoordinator.cpp
     src/core/PolicySync.cpp
     src/core/UplinkSync.cpp
+    src/service/Bootstrap.cpp
+    src/service/CompanionConfigStore.cpp
     src/service/ServiceHost.cpp
     src/tray/TrayApplication.cpp
 )

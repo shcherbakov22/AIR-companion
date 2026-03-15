@@ -21,6 +21,8 @@ This directory contains the initial implementation scaffold for the new companio
 - companion API client contract matching the Laravel backend
 - heartbeat and activity uplink wiring for the AIR companion API
 - network identity collection and Windows gateway/DNS adapter scaffolding
+- persisted local config under `%APPDATA%\\AIRCompanion\\config.json`
+- first-run bootstrap through `AIR_COMPANION_*` environment variables
 - service host entry point
 - tray app entry point
 - Visual Studio-friendly CMake build files
@@ -80,5 +82,10 @@ This app targets only the current AIR platform. It expects the companion API gro
 - Internet policy is derived from task templates and schedule state.
 - The companion is structured to route student traffic through the AIR host by setting gateway and DNS to the AIR server IP when policy sync runs.
 - The current Windows network implementation is still a stub adapter, but the core loop now carries the real gateway/DNS intent and reports network identity upstream.
+- First enrollment currently happens by launching the binary with:
+  - `AIR_COMPANION_BASE_URL`
+  - `AIR_COMPANION_USERNAME`
+  - `AIR_COMPANION_PASSWORD`
+  - optional `AIR_COMPANION_DEVICE_LABEL`
 - No legacy compatibility is included here.
 - This scaffold is intentionally stub-heavy right now: it defines the native app shape and contracts, while the Laravel platform side already exposes the first companion API surface.

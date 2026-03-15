@@ -5,9 +5,19 @@
 #include "companion/core/EnforcementCoordinator.h"
 #include "companion/core/PolicySync.h"
 #include "companion/networking/CompanionApiClient.h"
+#include "companion/service/Bootstrap.h"
 #include "companion/service/ServiceHost.h"
 
+#include <iostream>
+
 int main() {
+    companion::service::Bootstrap bootstrap;
+    const auto bootstrapped = bootstrap.initialize();
+    if (!bootstrapped.has_value()) {
+        std::cerr << "AIR Companion service bootstrap failed. Set AIR_COMPANION_USERNAME and AIR_COMPANION_PASSWORD for first enrollment." << '\n';
+        return 1;
+    }
+
     companion::adapters::windows::WindowsAppTrackerAdapter appTrackerAdapter;
     companion::adapters::windows::WindowsBrowserDomainAdapter browserDomainAdapter;
     companion::adapters::windows::WindowsScreenCaptureAdapter screenCaptureAdapter;
@@ -15,20 +25,16 @@ int main() {
     companion::adapters::windows::WindowsEnforcementAdapter enforcementAdapter;
     companion::adapters::windows::WindowsNetworkConfigurationAdapter networkConfigurationAdapter;
 
-    companion::networking::CompanionApiClient apiClient("https://127.0.0.1");
-    companion::models::DeviceIdentity identity{
-        "stub-device-id",
-        "student-pc",
-        "Student PC",
-        "windows",
-        AIR_COMPANION_VERSION,
-        "student",
-    };
-    companion::core::PolicySync policySync(apiClient, "stub-device-token");
-    companion::core::CommandPoller commandPoller(apiClient, "stub-device-token");
+    companion::core::PolicySync policySync(bootstrapped->apiClient, bootstrapped->config.deviceToken);
+    companion::core::CommandPoller commandPoller(bootstrapped->apiClient, bootstrapped->config.deviceToken);
     companion::core::CaptureScheduler captureScheduler;
     companion::core::EnforcementCoordinator enforcementCoordinator(enforcementAdapter);
-    companion::core::UplinkSync uplinkSync(apiClient, "stub-device-token", identity, networkConfigurationAdapter);
+    companion::core::UplinkSync uplinkSync(
+        bootstrapped->apiClient,
+        bootstrapped->config.deviceToken,
+        bootstrapped->config.identity,
+        networkConfigurationAdapter
+    );
     companion::core::Agent agent(
         std::move(policySync),
         std::move(commandPoller),
@@ -43,5 +49,6 @@ int main() {
     );
 
     companion::service::ServiceHost serviceHost(agent);
+    std::cout << bootstrapped->status << '\n';
     return serviceHost.run();
 }
