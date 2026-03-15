@@ -10,6 +10,7 @@ struct NetworkIdentity {
     std::string gatewayIpv4;
     std::string adapterName;
     std::string dnsIpv4;
+    unsigned long interfaceIndex{0};
     bool configuredThroughAirGateway{false};
 };
 

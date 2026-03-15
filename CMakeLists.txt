@@ -43,4 +43,5 @@ target_link_libraries(air_companion_tray PRIVATE air_companion_core)
 
 if(WIN32)
     target_compile_definitions(air_companion_core PUBLIC AIR_COMPANION_WINDOWS=1)
+    target_link_libraries(air_companion_core PUBLIC iphlpapi ws2_32)
 endif()

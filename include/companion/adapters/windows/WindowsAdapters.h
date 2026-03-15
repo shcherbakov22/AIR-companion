@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "companion/adapters/IBrowserDomainAdapter.h"
 #include "companion/adapters/ICameraCaptureAdapter.h"
@@ -58,14 +59,15 @@ public:
     std::string describeState() const override;
 
 private:
-    mutable models::NetworkIdentity m_currentIdentity{
-        "192.168.11.240",
-        "00:11:22:33:44:55",
-        "192.168.11.1",
-        "Ethernet",
-        "192.168.11.1",
-        false,
-    };
+    bool captureOriginalConfiguration();
+    std::optional<models::NetworkIdentity> detectPrimaryIdentity() const;
+    bool applyDefaultRoute(const std::string& gatewayIpv4) const;
+    bool applyDnsServer(const std::string& dnsIpv4) const;
+    static std::string quoteForCommand(const std::string& value);
+    static bool runCommand(const std::string& command);
+
+    mutable models::NetworkIdentity m_currentIdentity{};
+    std::optional<models::NetworkIdentity> m_originalIdentity;
     std::string m_state{"network passthrough"};
 };
 
