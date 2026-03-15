@@ -22,6 +22,7 @@ This directory contains the initial implementation scaffold for the new companio
 - heartbeat and activity uplink wiring for the AIR companion API
 - network identity collection and Windows gateway/DNS adapter scaffolding
 - persisted local config under `%APPDATA%\\AIRCompanion\\config.json`
+- hidden internal capture settings under `%PROGRAMDATA%\\AIRCompanion\\Internal\\capture-settings.json`
 - first-run bootstrap through `AIR_COMPANION_*` environment variables
 - service host entry point
 - tray app entry point
@@ -87,5 +88,10 @@ This app targets only the current AIR platform. It expects the companion API gro
   - `AIR_COMPANION_USERNAME`
   - `AIR_COMPANION_PASSWORD`
   - optional `AIR_COMPANION_DEVICE_LABEL`
+- Screen/camera capture behavior is also driven by a separate hidden machine-level settings file for:
+  - local capture enablement
+  - minimum capture intervals
+  - output directories
+  - content types
 - No legacy compatibility is included here.
 - This scaffold is intentionally stub-heavy right now: it defines the native app shape and contracts, while the Laravel platform side already exposes the first companion API surface.

@@ -435,7 +435,8 @@ bool CompanionApiClient::sendActivity(const std::string& deviceToken, const mode
 
 bool CompanionApiClient::uploadScreenCapture(const std::string& deviceToken,
                                              const std::string& filePath,
-                                             const models::ActivitySnapshot& snapshot) const {
+                                             const models::ActivitySnapshot& snapshot,
+                                             const std::string& contentType) const {
     const std::map<std::string, std::string> fields{
         {"app_name", snapshot.focusedApp},
         {"window_title", snapshot.focusedWindowTitle},
@@ -448,14 +449,15 @@ bool CompanionApiClient::uploadScreenCapture(const std::string& deviceToken,
         fields,
         "capture",
         filePath,
-        "image/png"
+        contentType
     );
     return response.statusCode >= 200 && response.statusCode < 300;
 }
 
 bool CompanionApiClient::uploadCameraCapture(const std::string& deviceToken,
                                              const std::string& filePath,
-                                             const models::ActivitySnapshot& snapshot) const {
+                                             const models::ActivitySnapshot& snapshot,
+                                             const std::string& contentType) const {
     const std::map<std::string, std::string> fields{
         {"app_name", snapshot.focusedApp},
         {"window_title", snapshot.focusedWindowTitle},
@@ -468,7 +470,7 @@ bool CompanionApiClient::uploadCameraCapture(const std::string& deviceToken,
         fields,
         "capture",
         filePath,
-        "image/png"
+        contentType
     );
     return response.statusCode >= 200 && response.statusCode < 300;
 }

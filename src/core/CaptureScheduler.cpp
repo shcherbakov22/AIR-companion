@@ -16,11 +16,14 @@ bool ready(std::chrono::steady_clock::time_point last,
 
 }  // namespace
 
+CaptureScheduler::CaptureScheduler(service::InternalCaptureSettings settings)
+    : m_settings(std::move(settings)) {}
+
 void CaptureScheduler::updatePolicy(const models::DevicePolicy& policy) {
-    m_captureScreen = policy.shouldCaptureScreen;
-    m_captureCamera = policy.shouldCaptureCamera;
-    m_screenIntervalSeconds = policy.screenCaptureIntervalSeconds;
-    m_cameraIntervalSeconds = policy.cameraCaptureIntervalSeconds;
+    m_captureScreen = policy.shouldCaptureScreen && m_settings.allowScreenCapture;
+    m_captureCamera = policy.shouldCaptureCamera && m_settings.allowCameraCapture;
+    m_screenIntervalSeconds = std::max(policy.screenCaptureIntervalSeconds, m_settings.minimumScreenIntervalSeconds);
+    m_cameraIntervalSeconds = std::max(policy.cameraCaptureIntervalSeconds, m_settings.minimumCameraIntervalSeconds);
 }
 
 bool CaptureScheduler::shouldCaptureScreen(std::chrono::steady_clock::time_point now) const {
@@ -39,5 +42,8 @@ void CaptureScheduler::markCameraCaptured(std::chrono::steady_clock::time_point 
     m_lastCameraCapture = now;
 }
 
-}  // namespace companion::core
+const service::InternalCaptureSettings& CaptureScheduler::settings() const {
+    return m_settings;
+}
 
+}  // namespace companion::core

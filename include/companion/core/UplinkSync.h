@@ -20,8 +20,12 @@ public:
                adapters::INetworkConfigurationAdapter& networkConfigurationAdapter);
 
     void sync(const models::ActivitySnapshot& snapshot, const std::optional<models::DevicePolicy>& policy);
-    bool uploadScreenCapture(const std::string& filePath, const models::ActivitySnapshot& snapshot);
-    bool uploadCameraCapture(const std::string& filePath, const models::ActivitySnapshot& snapshot);
+    bool uploadScreenCapture(const std::string& filePath,
+                             const models::ActivitySnapshot& snapshot,
+                             const std::string& contentType);
+    bool uploadCameraCapture(const std::string& filePath,
+                             const models::ActivitySnapshot& snapshot,
+                             const std::string& contentType);
     std::string statusSummary() const;
 
 private:

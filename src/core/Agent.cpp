@@ -59,14 +59,16 @@ void Agent::tick() {
 
         switch (command.type) {
             case models::DeviceCommandType::RequestScreenshot: {
-                const auto path = m_screenCaptureAdapter.captureToFile("captures/screen");
-                success = path.has_value() && m_uplinkSync.uploadScreenCapture(*path, snapshot);
+                const auto path = m_screenCaptureAdapter.captureToFile(m_captureScheduler.settings().screenOutputDirectory);
+                success = path.has_value()
+                    && m_uplinkSync.uploadScreenCapture(*path, snapshot, m_captureScheduler.settings().screenContentType);
                 output = success ? "screen capture uploaded" : "screen capture failed";
                 break;
             }
             case models::DeviceCommandType::RequestCameraCapture: {
-                const auto path = m_cameraCaptureAdapter.captureToFile("captures/camera");
-                success = path.has_value() && m_uplinkSync.uploadCameraCapture(*path, snapshot);
+                const auto path = m_cameraCaptureAdapter.captureToFile(m_captureScheduler.settings().cameraOutputDirectory);
+                success = path.has_value()
+                    && m_uplinkSync.uploadCameraCapture(*path, snapshot, m_captureScheduler.settings().cameraContentType);
                 output = success ? "camera capture uploaded" : "camera capture failed";
                 break;
             }
@@ -80,17 +82,17 @@ void Agent::tick() {
 
     const auto now = std::chrono::steady_clock::now();
     if (m_captureScheduler.shouldCaptureScreen(now)) {
-        const auto path = m_screenCaptureAdapter.captureToFile("captures/screen");
+        const auto path = m_screenCaptureAdapter.captureToFile(m_captureScheduler.settings().screenOutputDirectory);
         if (path.has_value()) {
-            (void)m_uplinkSync.uploadScreenCapture(*path, snapshot);
+            (void)m_uplinkSync.uploadScreenCapture(*path, snapshot, m_captureScheduler.settings().screenContentType);
             m_captureScheduler.markScreenCaptured(now);
         }
     }
 
     if (m_captureScheduler.shouldCaptureCamera(now)) {
-        const auto path = m_cameraCaptureAdapter.captureToFile("captures/camera");
+        const auto path = m_cameraCaptureAdapter.captureToFile(m_captureScheduler.settings().cameraOutputDirectory);
         if (path.has_value()) {
-            (void)m_uplinkSync.uploadCameraCapture(*path, snapshot);
+            (void)m_uplinkSync.uploadCameraCapture(*path, snapshot, m_captureScheduler.settings().cameraContentType);
             m_captureScheduler.markCameraCaptured(now);
         }
     }

@@ -61,12 +61,16 @@ void UplinkSync::sync(const models::ActivitySnapshot& snapshot, const std::optio
     }
 }
 
-bool UplinkSync::uploadScreenCapture(const std::string& filePath, const models::ActivitySnapshot& snapshot) {
-    return m_apiClient.uploadScreenCapture(m_deviceToken, filePath, snapshot);
+bool UplinkSync::uploadScreenCapture(const std::string& filePath,
+                                     const models::ActivitySnapshot& snapshot,
+                                     const std::string& contentType) {
+    return m_apiClient.uploadScreenCapture(m_deviceToken, filePath, snapshot, contentType);
 }
 
-bool UplinkSync::uploadCameraCapture(const std::string& filePath, const models::ActivitySnapshot& snapshot) {
-    return m_apiClient.uploadCameraCapture(m_deviceToken, filePath, snapshot);
+bool UplinkSync::uploadCameraCapture(const std::string& filePath,
+                                     const models::ActivitySnapshot& snapshot,
+                                     const std::string& contentType) {
+    return m_apiClient.uploadCameraCapture(m_deviceToken, filePath, snapshot, contentType);
 }
 
 std::string UplinkSync::statusSummary() const {

@@ -6,6 +6,7 @@
 #include "companion/core/PolicySync.h"
 #include "companion/networking/CompanionApiClient.h"
 #include "companion/service/Bootstrap.h"
+#include "companion/service/CaptureSettingsStore.h"
 #include "companion/service/ServiceHost.h"
 
 #include <iostream>
@@ -24,10 +25,12 @@ int main() {
     companion::adapters::windows::WindowsCameraCaptureAdapter cameraCaptureAdapter;
     companion::adapters::windows::WindowsEnforcementAdapter enforcementAdapter;
     companion::adapters::windows::WindowsNetworkConfigurationAdapter networkConfigurationAdapter;
+    companion::service::CaptureSettingsStore captureSettingsStore;
+    const auto captureSettings = captureSettingsStore.loadOrCreate();
 
     companion::core::PolicySync policySync(bootstrapped->apiClient, bootstrapped->config.deviceToken);
     companion::core::CommandPoller commandPoller(bootstrapped->apiClient, bootstrapped->config.deviceToken);
-    companion::core::CaptureScheduler captureScheduler;
+    companion::core::CaptureScheduler captureScheduler(captureSettings);
     companion::core::EnforcementCoordinator enforcementCoordinator(enforcementAdapter);
     companion::core::UplinkSync uplinkSync(
         bootstrapped->apiClient,
