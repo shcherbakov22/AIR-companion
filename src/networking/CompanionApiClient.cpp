@@ -1,5 +1,8 @@
 #include "companion/networking/CompanionApiClient.h"
 
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <utility>
 
@@ -52,6 +55,28 @@ std::string jsonArray(const std::vector<std::string>& values) {
     }
     out << "]";
     return out.str();
+}
+
+void appendDebugLog(const std::string& line) {
+#ifdef _WIN32
+    const char* appData = std::getenv("APPDATA");
+    if (appData == nullptr || *appData == '\0') {
+        return;
+    }
+
+    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
+    std::error_code errorCode;
+    std::filesystem::create_directories(logDirectory, errorCode);
+
+    std::ofstream output(logDirectory / "debug.log", std::ios::app);
+    if (!output.is_open()) {
+        return;
+    }
+
+    output << line << '\n';
+#else
+    (void) line;
+#endif
 }
 
 std::optional<std::string> jsonObjectString(const std::string& body, const std::string& key) {
@@ -109,10 +134,16 @@ std::optional<std::string> jsonStringValue(const std::string& body, const std::s
     }
 
     const auto colonPos = body.find(':', keyPos);
-    const auto openingQuote = body.find('"', colonPos + 1);
-    if (colonPos == std::string::npos || openingQuote == std::string::npos) {
+    if (colonPos == std::string::npos) {
         return std::nullopt;
     }
+
+    const auto valueStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+    if (valueStart == std::string::npos || body[valueStart] != '"') {
+        return std::nullopt;
+    }
+
+    const auto openingQuote = valueStart;
 
     std::string value;
     for (std::size_t index = openingQuote + 1; index < body.size(); ++index) {
@@ -316,6 +347,7 @@ std::optional<models::DevicePolicy> CompanionApiClient::fetchPolicy(const std::s
 
 std::vector<models::DeviceCommand> CompanionApiClient::fetchCommands(const std::string& deviceToken) const {
     const auto response = m_httpClient.get(m_baseUrl + "/api/companion/commands/next", jsonHeaders(deviceToken));
+    appendDebugLog("fetchCommands status=" + std::to_string(response.statusCode) + " body=" + response.body);
     if (response.statusCode < 200 || response.statusCode >= 300) {
         return {};
     }
@@ -326,14 +358,20 @@ std::vector<models::DeviceCommand> CompanionApiClient::fetchCommands(const std::
     }
 
     models::DeviceCommand command;
-    command.id = jsonStringValue(*commandBody, "id").value_or({});
+    command.id = jsonStringValue(*commandBody, "id")
+        .value_or(jsonIntValue(*commandBody, "id").has_value()
+            ? std::to_string(*jsonIntValue(*commandBody, "id"))
+            : std::string{});
     command.status = jsonStringValue(*commandBody, "status").value_or({});
     command.type = parseCommandType(jsonStringValue(*commandBody, "command_type").value_or({}));
     command.payloadJson = jsonObjectString(*commandBody, "payload").value_or("{}");
 
     if (command.id.empty()) {
+        appendDebugLog("fetchCommands parsed empty command id");
         return {};
     }
+
+    appendDebugLog("fetchCommands parsed command id=" + command.id + " type=" + jsonStringValue(*commandBody, "command_type").value_or({}));
 
     return {command};
 }
@@ -344,6 +382,7 @@ bool CompanionApiClient::acknowledgeCommand(const std::string& deviceToken, cons
         jsonHeaders(deviceToken),
         "{}"
     );
+    appendDebugLog("acknowledgeCommand id=" + commandId + " status=" + std::to_string(response.statusCode) + " body=" + response.body);
     return response.statusCode >= 200 && response.statusCode < 300;
 }
 
@@ -361,6 +400,7 @@ bool CompanionApiClient::submitCommandResult(const std::string& deviceToken,
         jsonHeaders(deviceToken),
         body.str()
     );
+    appendDebugLog("submitCommandResult id=" + commandId + " success=" + std::string(success ? "true" : "false") + " status=" + std::to_string(response.statusCode) + " body=" + response.body);
     return response.statusCode >= 200 && response.statusCode < 300;
 }
 

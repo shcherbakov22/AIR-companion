@@ -1,7 +1,9 @@
 #include "companion/adapters/windows/WindowsAdapters.h"
 
 #ifdef _WIN32
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -25,6 +27,24 @@
 using Microsoft::WRL::ComPtr;
 
 namespace {
+
+void appendDebugLog(const std::string& line) {
+    const char* appData = std::getenv("APPDATA");
+    if (appData == nullptr || *appData == '\0') {
+        return;
+    }
+
+    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
+    std::error_code errorCode;
+    std::filesystem::create_directories(logDirectory, errorCode);
+
+    std::ofstream output(logDirectory / "debug.log", std::ios::app);
+    if (!output.is_open()) {
+        return;
+    }
+
+    output << line << '\n';
+}
 
 class ScopedCoInitialize {
 public:
@@ -169,31 +189,37 @@ std::optional<std::string> WindowsCameraCaptureAdapter::captureToFile(const std:
 #ifdef _WIN32
     ScopedCoInitialize coInitialize;
     if (!coInitialize.ok()) {
+        appendDebugLog("camera: CoInitialize failed");
         return std::nullopt;
     }
 
     ScopedMfStartup mfStartup;
     if (!mfStartup.ok()) {
+        appendDebugLog("camera: MFStartup failed");
         return std::nullopt;
     }
 
     ComPtr<IMFAttributes> attributes;
     if (FAILED(MFCreateAttributes(&attributes, 1))) {
+        appendDebugLog("camera: MFCreateAttributes failed");
         return std::nullopt;
     }
 
     if (FAILED(attributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID))) {
+        appendDebugLog("camera: SetGUID source type failed");
         return std::nullopt;
     }
 
     IMFActivate** devices = nullptr;
     UINT32 deviceCount = 0;
     if (FAILED(MFEnumDeviceSources(attributes.Get(), &devices, &deviceCount)) || deviceCount == 0) {
+        appendDebugLog("camera: MFEnumDeviceSources failed or found no devices");
         if (devices != nullptr) {
             CoTaskMemFree(devices);
         }
         return std::nullopt;
     }
+    appendDebugLog("camera: enumerated devices=" + std::to_string(deviceCount));
 
     auto freeDevices = [&]() {
         for (UINT32 index = 0; index < deviceCount; ++index) {
@@ -209,16 +235,30 @@ std::optional<std::string> WindowsCameraCaptureAdapter::captureToFile(const std:
     freeDevices();
 
     if (FAILED(activateResult) || mediaSource == nullptr) {
+        appendDebugLog("camera: ActivateObject failed");
+        return std::nullopt;
+    }
+
+    ComPtr<IMFAttributes> sourceReaderAttributes;
+    if (FAILED(MFCreateAttributes(&sourceReaderAttributes, 2))) {
+        appendDebugLog("camera: MFCreateAttributes for source reader failed");
+        return std::nullopt;
+    }
+
+    if (FAILED(sourceReaderAttributes->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE))) {
+        appendDebugLog("camera: enabling video processing failed");
         return std::nullopt;
     }
 
     ComPtr<IMFSourceReader> sourceReader;
-    if (FAILED(MFCreateSourceReaderFromMediaSource(mediaSource.Get(), nullptr, &sourceReader))) {
+    if (FAILED(MFCreateSourceReaderFromMediaSource(mediaSource.Get(), sourceReaderAttributes.Get(), &sourceReader))) {
+        appendDebugLog("camera: MFCreateSourceReaderFromMediaSource failed");
         return std::nullopt;
     }
 
     ComPtr<IMFMediaType> targetMediaType;
     if (FAILED(MFCreateMediaType(&targetMediaType))) {
+        appendDebugLog("camera: MFCreateMediaType failed");
         return std::nullopt;
     }
 
@@ -228,19 +268,23 @@ std::optional<std::string> WindowsCameraCaptureAdapter::captureToFile(const std:
             static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
             nullptr,
             targetMediaType.Get()))) {
+        appendDebugLog("camera: SetCurrentMediaType RGB32 failed");
         return std::nullopt;
     }
 
     ComPtr<IMFMediaType> currentMediaType;
     if (FAILED(sourceReader->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), &currentMediaType))) {
+        appendDebugLog("camera: GetCurrentMediaType failed");
         return std::nullopt;
     }
 
     UINT32 width = 0;
     UINT32 height = 0;
     if (!readFrameSize(currentMediaType.Get(), width, height) || width == 0 || height == 0) {
+        appendDebugLog("camera: invalid frame size");
         return std::nullopt;
     }
+    appendDebugLog("camera: frame size=" + std::to_string(width) + "x" + std::to_string(height));
 
     for (int attempt = 0; attempt < 30; ++attempt) {
         DWORD streamIndex = 0;
@@ -257,16 +301,19 @@ std::optional<std::string> WindowsCameraCaptureAdapter::captureToFile(const std:
             &sample);
 
         if (FAILED(readResult)) {
+            appendDebugLog("camera: ReadSample failed");
             return std::nullopt;
         }
 
         if ((streamFlags & MF_SOURCE_READERF_STREAMTICK) != 0 || sample == nullptr) {
+            appendDebugLog("camera: stream tick or null sample attempt=" + std::to_string(attempt));
             Sleep(50);
             continue;
         }
 
         ComPtr<IMFMediaBuffer> mediaBuffer;
         if (FAILED(sample->ConvertToContiguousBuffer(&mediaBuffer)) || mediaBuffer == nullptr) {
+            appendDebugLog("camera: ConvertToContiguousBuffer failed");
             return std::nullopt;
         }
 
@@ -274,15 +321,18 @@ std::optional<std::string> WindowsCameraCaptureAdapter::captureToFile(const std:
         DWORD maxLength = 0;
         DWORD currentLength = 0;
         if (FAILED(mediaBuffer->Lock(&data, &maxLength, &currentLength)) || data == nullptr || currentLength == 0) {
+            appendDebugLog("camera: mediaBuffer lock failed");
             return std::nullopt;
         }
 
         const LONG stride = static_cast<LONG>(width * 4);
         const auto savedPath = saveFrameAsPng(outputDirectory, data, width, height, stride);
         mediaBuffer->Unlock();
+        appendDebugLog("camera: save result=" + std::string(savedPath.has_value() ? *savedPath : "null"));
         return savedPath;
     }
 
+    appendDebugLog("camera: no sample received after retries");
     return std::nullopt;
 #else
     (void) outputDirectory;

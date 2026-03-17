@@ -1,9 +1,38 @@
 #include "companion/core/Agent.h"
 
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <utility>
 
 namespace companion::core {
+
+namespace {
+
+void appendDebugLog(const std::string& line) {
+#ifdef _WIN32
+    const char* appData = std::getenv("APPDATA");
+    if (appData == nullptr || *appData == '\0') {
+        return;
+    }
+
+    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
+    std::error_code errorCode;
+    std::filesystem::create_directories(logDirectory, errorCode);
+
+    std::ofstream output(logDirectory / "debug.log", std::ios::app);
+    if (!output.is_open()) {
+        return;
+    }
+
+    output << line << '\n';
+#else
+    (void) line;
+#endif
+}
+
+}  // namespace
 
 Agent::Agent(PolicySync policySync,
              CommandPoller commandPoller,
@@ -53,6 +82,7 @@ void Agent::tick() {
     m_uplinkSync.sync(snapshot, policy.has_value() ? policy : m_lastPolicy);
 
     for (const auto& command : m_commandPoller.poll()) {
+        appendDebugLog("agent command received id=" + command.id);
         m_commandPoller.acknowledge(command.id);
         bool success = true;
         std::string output = "completed";
@@ -63,6 +93,7 @@ void Agent::tick() {
                 success = path.has_value()
                     && m_uplinkSync.uploadScreenCapture(*path, snapshot, m_captureScheduler.settings().screenContentType);
                 output = success ? "screen capture uploaded" : "screen capture failed";
+                appendDebugLog("agent screenshot command success=" + std::string(success ? "true" : "false"));
                 break;
             }
             case models::DeviceCommandType::RequestCameraCapture: {
@@ -70,10 +101,12 @@ void Agent::tick() {
                 success = path.has_value()
                     && m_uplinkSync.uploadCameraCapture(*path, snapshot, m_captureScheduler.settings().cameraContentType);
                 output = success ? "camera capture uploaded" : "camera capture failed";
+                appendDebugLog("agent camera command success=" + std::string(success ? "true" : "false") + " path=" + (path.has_value() ? *path : std::string{}));
                 break;
             }
             default:
                 m_enforcementCoordinator.applyCommand(command);
+                appendDebugLog("agent non-capture command processed");
                 break;
         }
 
