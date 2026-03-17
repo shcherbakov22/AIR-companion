@@ -44,6 +44,14 @@ cmake -S . -B build -G "Visual Studio 17 2022"
 cmake --build build --config Debug
 ```
 
+## Test
+
+Run the native companion test suite with:
+
+```powershell
+ctest -C Debug --output-on-failure --test-dir build\windows-debug
+```
+
 ## Folder layout
 
 - `docs/`

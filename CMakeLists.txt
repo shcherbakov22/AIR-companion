@@ -5,10 +5,12 @@ project(AIRCompanion VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+enable_testing()
 
 set(COMPANION_CORE_SOURCES
     src/networking/HttpClient.cpp
     src/networking/CompanionApiClient.cpp
+    src/networking/CompanionApiParsers.cpp
     src/adapters/windows/WindowsAppTrackerAdapter.cpp
     src/adapters/windows/WindowsBrowserDomainAdapter.cpp
     src/adapters/windows/WindowsCameraCaptureAdapter.cpp
@@ -46,7 +48,12 @@ target_link_libraries(air_companion_service PRIVATE air_companion_core)
 add_executable(air_companion_tray src/tray/main.cpp)
 target_link_libraries(air_companion_tray PRIVATE air_companion_core)
 
+add_executable(air_companion_tests tests/CompanionTests.cpp)
+target_link_libraries(air_companion_tests PRIVATE air_companion_core)
+
 if(WIN32)
     target_compile_definitions(air_companion_core PUBLIC AIR_COMPANION_WINDOWS=1)
     target_link_libraries(air_companion_core PUBLIC iphlpapi ws2_32 gdiplus mf mfplat mfreadwrite mfuuid ole32 user32)
 endif()
+
+add_test(NAME air_companion_tests COMMAND air_companion_tests)

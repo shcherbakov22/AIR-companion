@@ -1,4 +1,5 @@
 #include "companion/networking/CompanionApiClient.h"
+#include "companion/networking/CompanionApiParsers.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -79,153 +80,6 @@ void appendDebugLog(const std::string& line) {
 #endif
 }
 
-std::optional<std::string> jsonObjectString(const std::string& body, const std::string& key) {
-    const auto keyPos = body.find("\"" + key + "\"");
-    if (keyPos == std::string::npos) {
-        return std::nullopt;
-    }
-
-    const auto objectStart = body.find('{', keyPos);
-    if (objectStart == std::string::npos) {
-        return std::nullopt;
-    }
-
-    int depth = 0;
-    bool inString = false;
-    bool escaped = false;
-    for (std::size_t index = objectStart; index < body.size(); ++index) {
-        const char ch = body[index];
-
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (ch == '\\') {
-                escaped = true;
-            } else if (ch == '"') {
-                inString = false;
-            }
-            continue;
-        }
-
-        if (ch == '"') {
-            inString = true;
-            continue;
-        }
-
-        if (ch == '{') {
-            ++depth;
-        } else if (ch == '}') {
-            --depth;
-            if (depth == 0) {
-                return body.substr(objectStart, index - objectStart + 1);
-            }
-        }
-    }
-
-    return std::nullopt;
-}
-
-std::optional<std::string> jsonStringValue(const std::string& body, const std::string& key) {
-    const auto keyPos = body.find("\"" + key + "\"");
-    if (keyPos == std::string::npos) {
-        return std::nullopt;
-    }
-
-    const auto colonPos = body.find(':', keyPos);
-    if (colonPos == std::string::npos) {
-        return std::nullopt;
-    }
-
-    const auto valueStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
-    if (valueStart == std::string::npos || body[valueStart] != '"') {
-        return std::nullopt;
-    }
-
-    const auto openingQuote = valueStart;
-
-    std::string value;
-    for (std::size_t index = openingQuote + 1; index < body.size(); ++index) {
-        const char ch = body[index];
-        if (ch == '\\' && index + 1 < body.size()) {
-            value += body[index + 1];
-            ++index;
-            continue;
-        }
-        if (ch == '"') {
-            return value;
-        }
-        value += ch;
-    }
-
-    return std::nullopt;
-}
-
-std::optional<bool> jsonBoolValue(const std::string& body, const std::string& key) {
-    const auto keyPos = body.find("\"" + key + "\"");
-    if (keyPos == std::string::npos) {
-        return std::nullopt;
-    }
-
-    const auto colonPos = body.find(':', keyPos);
-    if (colonPos == std::string::npos) {
-        return std::nullopt;
-    }
-
-    const auto truePos = body.find("true", colonPos + 1);
-    const auto falsePos = body.find("false", colonPos + 1);
-    const auto endPos = body.find_first_of(",}", colonPos + 1);
-
-    if (truePos != std::string::npos && truePos < endPos) {
-        return true;
-    }
-    if (falsePos != std::string::npos && falsePos < endPos) {
-        return false;
-    }
-
-    return std::nullopt;
-}
-
-std::optional<int> jsonIntValue(const std::string& body, const std::string& key) {
-    const auto keyPos = body.find("\"" + key + "\"");
-    if (keyPos == std::string::npos) {
-        return std::nullopt;
-    }
-
-    const auto colonPos = body.find(':', keyPos);
-    if (colonPos == std::string::npos) {
-        return std::nullopt;
-    }
-
-    const auto numberStart = body.find_first_of("-0123456789", colonPos + 1);
-    const auto numberEnd = body.find_first_not_of("0123456789", numberStart);
-    if (numberStart == std::string::npos) {
-        return std::nullopt;
-    }
-
-    return std::stoi(body.substr(numberStart, numberEnd - numberStart));
-}
-
-models::DeviceCommandType parseCommandType(const std::string& type) {
-    if (type == "refresh_policy") {
-        return models::DeviceCommandType::RefreshPolicy;
-    }
-    if (type == "request_screenshot") {
-        return models::DeviceCommandType::RequestScreenshot;
-    }
-    if (type == "request_camera_capture") {
-        return models::DeviceCommandType::RequestCameraCapture;
-    }
-    if (type == "lock_internet") {
-        return models::DeviceCommandType::LockInternet;
-    }
-    if (type == "unlock_internet") {
-        return models::DeviceCommandType::UnlockInternet;
-    }
-    return models::DeviceCommandType::Unknown;
-}
-
 std::map<std::string, std::string> jsonHeaders(const std::string& deviceToken = {}) {
     std::map<std::string, std::string> headers{
         {"Accept", "application/json"},
@@ -262,21 +116,7 @@ std::optional<models::DeviceEnrollment> CompanionApiClient::enroll(
         return std::nullopt;
     }
 
-    const auto token = jsonStringValue(response.body, "token");
-    if (!token.has_value()) {
-        return std::nullopt;
-    }
-
-    models::DeviceEnrollment enrollment{identity, *token};
-    if (const auto student = jsonObjectString(response.body, "student"); student.has_value()) {
-        enrollment.identity.studentUsername = jsonStringValue(*student, "username").value_or(username);
-    }
-    if (const auto device = jsonObjectString(response.body, "device"); device.has_value()) {
-        enrollment.identity.deviceLabel = jsonStringValue(*device, "label").value_or(identity.deviceLabel);
-        enrollment.identity.hostname = jsonStringValue(*device, "hostname").value_or(identity.hostname);
-    }
-
-    return enrollment;
+    return parseEnrollmentResponse(response.body, identity, username);
 }
 
 std::optional<std::string> CompanionApiClient::renewToken(const std::string& deviceToken) const {
@@ -289,7 +129,7 @@ std::optional<std::string> CompanionApiClient::renewToken(const std::string& dev
         return std::nullopt;
     }
 
-    return jsonStringValue(response.body, "token");
+    return parseRenewTokenResponse(response.body);
 }
 
 std::optional<models::DevicePolicy> CompanionApiClient::fetchPolicy(const std::string& deviceToken) const {
@@ -298,51 +138,7 @@ std::optional<models::DevicePolicy> CompanionApiClient::fetchPolicy(const std::s
         return std::nullopt;
     }
 
-    models::DevicePolicy policy;
-    policy.policyHash = jsonStringValue(response.body, "policy_hash").value_or({});
-
-    if (const auto policyBody = jsonObjectString(response.body, "policy"); policyBody.has_value()) {
-        if (const auto student = jsonObjectString(*policyBody, "student"); student.has_value()) {
-            policy.studentDisplayName = jsonStringValue(*student, "display_name").value_or({});
-        }
-
-        if (const auto schedule = jsonObjectString(*policyBody, "schedule"); schedule.has_value()) {
-            policy.activeScheduleName = jsonStringValue(*schedule, "name").value_or({});
-        }
-
-        if (const auto task = jsonObjectString(*policyBody, "task"); task.has_value()) {
-            policy.activeTaskName = jsonStringValue(*task, "title").value_or({});
-        }
-
-        if (const auto gate = jsonObjectString(*policyBody, "communication_gate"); gate.has_value()) {
-            policy.hasUnreadMentorChat = jsonBoolValue(*gate, "has_unread_chat").value_or(false);
-            policy.hasUnreadAnnouncements = jsonBoolValue(*gate, "has_unread_announcements").value_or(false);
-        }
-
-        if (const auto violations = jsonObjectString(*policyBody, "violations"); violations.has_value()) {
-            policy.hasOpenViolations = jsonIntValue(*violations, "open_count").value_or(0) > 0;
-        }
-
-        if (const auto capture = jsonObjectString(*policyBody, "capture"); capture.has_value()) {
-            policy.shouldCaptureScreen = jsonBoolValue(*capture, "screen_enabled").value_or(true);
-            policy.shouldCaptureCamera = jsonBoolValue(*capture, "camera_enabled").value_or(false);
-            policy.screenCaptureIntervalSeconds = jsonIntValue(*capture, "screen_interval_seconds").value_or(30);
-            policy.cameraCaptureIntervalSeconds = jsonIntValue(*capture, "camera_interval_seconds").value_or(60);
-        }
-
-        if (const auto internet = jsonObjectString(*policyBody, "internet_policy"); internet.has_value()) {
-            const auto mode = jsonStringValue(*internet, "mode").value_or("block_all");
-            if (mode == "allow_all") {
-                policy.internetAccessMode = models::InternetAccessMode::AllowAll;
-            } else if (mode == "allow_list_only") {
-                policy.internetAccessMode = models::InternetAccessMode::AllowListOnly;
-            } else {
-                policy.internetAccessMode = models::InternetAccessMode::BlockAll;
-            }
-        }
-    }
-
-    return policy;
+    return parsePolicyResponse(response.body);
 }
 
 std::vector<models::DeviceCommand> CompanionApiClient::fetchCommands(const std::string& deviceToken) const {
@@ -352,28 +148,16 @@ std::vector<models::DeviceCommand> CompanionApiClient::fetchCommands(const std::
         return {};
     }
 
-    const auto commandBody = jsonObjectString(response.body, "command");
-    if (!commandBody.has_value()) {
-        return {};
-    }
-
-    models::DeviceCommand command;
-    command.id = jsonStringValue(*commandBody, "id")
-        .value_or(jsonIntValue(*commandBody, "id").has_value()
-            ? std::to_string(*jsonIntValue(*commandBody, "id"))
-            : std::string{});
-    command.status = jsonStringValue(*commandBody, "status").value_or({});
-    command.type = parseCommandType(jsonStringValue(*commandBody, "command_type").value_or({}));
-    command.payloadJson = jsonObjectString(*commandBody, "payload").value_or("{}");
-
-    if (command.id.empty()) {
+    const auto commands = parseCommandResponse(response.body);
+    if (commands.empty()) {
         appendDebugLog("fetchCommands parsed empty command id");
         return {};
     }
 
-    appendDebugLog("fetchCommands parsed command id=" + command.id + " type=" + jsonStringValue(*commandBody, "command_type").value_or({}));
+    const auto& command = commands.front();
+    appendDebugLog("fetchCommands parsed command id=" + command.id + " type=" + std::to_string(static_cast<int>(command.type)));
 
-    return {command};
+    return commands;
 }
 
 bool CompanionApiClient::acknowledgeCommand(const std::string& deviceToken, const std::string& commandId) const {
