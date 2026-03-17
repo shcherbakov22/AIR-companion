@@ -36,6 +36,7 @@ std::optional<BootstrapResult> Bootstrap::initialize() const {
             request->password,
             request->deviceLabel.empty() ? defaultDeviceLabel() : request->deviceLabel
         ); bootstrapped.has_value()) {
+            (void) m_enrollmentRequestStore.clear();
             return bootstrapped;
         }
     }
@@ -49,12 +50,18 @@ std::optional<BootstrapResult> Bootstrap::initialize() const {
         return std::nullopt;
     }
 
-    return initializeFromCredentials(
+    const auto bootstrapped = initializeFromCredentials(
         baseUrl,
         username,
         password,
         envOrDefault("AIR_COMPANION_DEVICE_LABEL", defaultDeviceLabel())
     );
+
+    if (bootstrapped.has_value()) {
+        (void) m_enrollmentRequestStore.clear();
+    }
+
+    return bootstrapped;
 }
 
 std::string Bootstrap::envOrDefault(const char* name, const std::string& fallback) {

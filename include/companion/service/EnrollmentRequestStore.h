@@ -14,8 +14,11 @@ struct EnrollmentRequest {
 
 class EnrollmentRequestStore {
 public:
+    std::optional<EnrollmentRequest> loadDraft() const;
     std::optional<EnrollmentRequest> load() const;
+    bool save(const EnrollmentRequest& request) const;
     bool saveTemplate() const;
+    bool clear() const;
     std::string requestPath() const;
 
 private:

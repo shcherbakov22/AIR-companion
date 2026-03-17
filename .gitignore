@@ -1,4 +1,8 @@
 out/
 .vs/
 CMakeUserPresets.json
+build/
+captures/
+service-out.log
+service-err.log
 

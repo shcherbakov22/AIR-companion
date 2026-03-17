@@ -93,7 +93,7 @@ void hidePath(const std::string& path) {
 
 }  // namespace
 
-std::optional<EnrollmentRequest> EnrollmentRequestStore::load() const {
+std::optional<EnrollmentRequest> EnrollmentRequestStore::loadDraft() const {
     std::ifstream input(requestPath(), std::ios::binary);
     if (!input.is_open()) {
         return std::nullopt;
@@ -109,14 +109,23 @@ std::optional<EnrollmentRequest> EnrollmentRequestStore::load() const {
     request.password = extractJsonString(body, "password").value_or({});
     request.deviceLabel = extractJsonString(body, "device_label").value_or({});
 
-    if (request.baseUrl.empty() || request.username.empty() || request.password.empty()) {
+    return request;
+}
+
+std::optional<EnrollmentRequest> EnrollmentRequestStore::load() const {
+    const auto request = loadDraft();
+    if (!request.has_value()) {
+        return std::nullopt;
+    }
+
+    if (request->baseUrl.empty() || request->username.empty() || request->password.empty()) {
         return std::nullopt;
     }
 
     return request;
 }
 
-bool EnrollmentRequestStore::saveTemplate() const {
+bool EnrollmentRequestStore::save(const EnrollmentRequest& request) const {
     const auto directory = requestDirectory();
     std::error_code error;
     std::filesystem::create_directories(directory, error);
@@ -133,15 +142,30 @@ bool EnrollmentRequestStore::saveTemplate() const {
 
     output
         << "{\n"
-        << "  \"base_url\": \"https://192.168.11.228\",\n"
-        << "  \"username\": \"\",\n"
-        << "  \"password\": \"\",\n"
-        << "  \"device_label\": \"\"\n"
+        << "  \"base_url\": \"" << escapeJson(request.baseUrl) << "\",\n"
+        << "  \"username\": \"" << escapeJson(request.username) << "\",\n"
+        << "  \"password\": \"" << escapeJson(request.password) << "\",\n"
+        << "  \"device_label\": \"" << escapeJson(request.deviceLabel) << "\"\n"
         << "}\n";
 
     output.flush();
     hidePath(requestPath());
     return output.good();
+}
+
+bool EnrollmentRequestStore::saveTemplate() const {
+    return save(EnrollmentRequest{
+        .baseUrl = "https://192.168.11.228",
+        .username = {},
+        .password = {},
+        .deviceLabel = {},
+    });
+}
+
+bool EnrollmentRequestStore::clear() const {
+    std::error_code error;
+    std::filesystem::remove(requestPath(), error);
+    return !error;
 }
 
 std::string EnrollmentRequestStore::requestPath() const {
