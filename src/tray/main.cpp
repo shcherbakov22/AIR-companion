@@ -14,35 +14,70 @@
 
 #include <iostream>
 
-int main() {
+namespace {
+
+bool hasArgument(int argc, char* argv[], const char* expected) {
+    for (int index = 1; index < argc; ++index) {
+        if (std::string(argv[index]) == expected) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+companion::service::EnrollmentRequest initialEnrollmentRequest() {
+    companion::service::EnrollmentRequestStore enrollmentRequestStore;
+    companion::service::CompanionConfigStore configStore;
+
+    auto draft = enrollmentRequestStore.loadDraft().value_or(companion::service::EnrollmentRequest{
+        "https://192.168.11.228",
+        {},
+        {},
+        {},
+    });
+
+    if (const auto stored = configStore.load(); stored.has_value()) {
+        if (draft.baseUrl.empty()) {
+            draft.baseUrl = stored->baseUrl;
+        }
+        if (draft.username.empty()) {
+            draft.username = stored->identity.studentUsername;
+        }
+        if (draft.deviceLabel.empty()) {
+            draft.deviceLabel = stored->identity.deviceLabel;
+        }
+    }
+
+    return draft;
+}
+
+}  // namespace
+
+int main(int argc, char* argv[]) {
     companion::service::Bootstrap bootstrap;
-    auto bootstrapped = bootstrap.initialize();
-    if (!bootstrapped.has_value()) {
-        companion::service::EnrollmentRequestStore enrollmentRequestStore;
-        companion::service::CompanionConfigStore configStore;
+    companion::service::EnrollmentRequestStore enrollmentRequestStore;
+    companion::service::CompanionConfigStore configStore;
 
-        auto draft = enrollmentRequestStore.loadDraft().value_or(companion::service::EnrollmentRequest{
-            "https://192.168.11.228",
-            {},
-            {},
-            {},
-        });
+    if (hasArgument(argc, argv, "--settings")) {
+        const auto request = companion::tray::EnrollmentWindow::prompt(
+            initialEnrollmentRequest(),
+            "Update AIR enrollment details for this device."
+        );
 
-        if (const auto stored = configStore.load(); stored.has_value()) {
-            if (draft.baseUrl.empty()) {
-                draft.baseUrl = stored->baseUrl;
-            }
-            if (draft.username.empty()) {
-                draft.username = stored->identity.studentUsername;
-            }
-            if (draft.deviceLabel.empty()) {
-                draft.deviceLabel = stored->identity.deviceLabel;
-            }
+        if (!request.has_value() || !enrollmentRequestStore.save(*request)) {
+            std::cerr << "AIR Companion settings cancelled." << '\n';
+            return 1;
         }
 
+        (void) configStore.clear();
+    }
+
+    auto bootstrapped = bootstrap.initialize();
+    if (!bootstrapped.has_value()) {
         const auto request = companion::tray::EnrollmentWindow::prompt(
-            draft,
-            "Saved enrollment is missing or expired. Enter AIR credentials to enroll this device."
+            initialEnrollmentRequest(),
+            "Enter AIR credentials to enroll this device."
         );
 
         if (!request.has_value() || !enrollmentRequestStore.save(*request)) {

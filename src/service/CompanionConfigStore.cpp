@@ -128,6 +128,12 @@ bool CompanionConfigStore::save(const StoredCompanionConfig& config) const {
     return output.good();
 }
 
+bool CompanionConfigStore::clear() const {
+    std::error_code error;
+    std::filesystem::remove(configPath(), error);
+    return !error;
+}
+
 std::string CompanionConfigStore::configPath() const {
     return configDirectory() + "\\config.json";
 }

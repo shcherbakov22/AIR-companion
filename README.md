@@ -23,7 +23,7 @@ This directory contains the initial implementation scaffold for the new companio
 - network identity collection and Windows gateway/DNS adapter scaffolding
 - persisted local config under `%APPDATA%\\AIRCompanion\\config.json`
 - hidden internal capture settings under `%PROGRAMDATA%\\AIRCompanion\\Internal\\capture-settings.json`
-- first-run bootstrap through `AIR_COMPANION_*` environment variables
+- first-run bootstrap through a native enrollment window in the tray app
 - service host entry point
 - tray app entry point
 - Visual Studio-friendly CMake build files
@@ -80,14 +80,10 @@ This app targets only the current AIR platform. It expects the companion API gro
 ## Notes
 
 - V1 is Windows-first and structured for Linux adapters later.
-- Internet policy is derived from task templates and schedule state.
-- The companion is structured to route student traffic through the AIR host by setting gateway and DNS to the AIR server IP when policy sync runs.
-- The current Windows network implementation is still a stub adapter, but the core loop now carries the real gateway/DNS intent and reports network identity upstream.
-- First enrollment currently happens by launching the binary with:
-  - `AIR_COMPANION_BASE_URL`
-  - `AIR_COMPANION_USERNAME`
-  - `AIR_COMPANION_PASSWORD`
-  - optional `AIR_COMPANION_DEVICE_LABEL`
+- Internet policy is currently paused; the companion reports network identity but does not rewrite gateway or DNS.
+- First enrollment now happens through a small native window when the tray starts without a saved config.
+- You can reopen enrollment settings on an installed machine with:
+  - `air_companion_tray --settings`
 - Screen/camera capture behavior is also driven by a separate hidden machine-level settings file for:
   - local capture enablement
   - minimum capture intervals

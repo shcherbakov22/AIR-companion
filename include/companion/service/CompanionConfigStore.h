@@ -17,6 +17,7 @@ class CompanionConfigStore {
 public:
     std::optional<StoredCompanionConfig> load() const;
     bool save(const StoredCompanionConfig& config) const;
+    bool clear() const;
     std::string configPath() const;
 
 private:
