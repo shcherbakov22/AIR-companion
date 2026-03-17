@@ -23,17 +23,7 @@ UplinkSync::UplinkSync(networking::CompanionApiClient apiClient,
 
 void UplinkSync::sync(const models::ActivitySnapshot& snapshot, const std::optional<models::DevicePolicy>& policy) {
     auto updatedSnapshot = snapshot;
-
-    if (policy.has_value()) {
-        const auto gatewayHost = hostFromUrl(m_apiClient.baseUrl());
-        if (!gatewayHost.empty()) {
-            if (m_networkConfigurationAdapter.ensureAirGateway(gatewayHost, gatewayHost)) {
-                m_status = "gateway bound to " + gatewayHost;
-            } else {
-                m_status = "gateway bind failed";
-            }
-        }
-    }
+    (void) policy;
 
     updatedSnapshot.networkIdentity = m_networkConfigurationAdapter.currentIdentity();
 
@@ -43,7 +33,7 @@ void UplinkSync::sync(const models::ActivitySnapshot& snapshot, const std::optio
         if (m_apiClient.sendHeartbeat(m_deviceToken, m_identity, updatedSnapshot, m_networkConfigurationAdapter.describeState())) {
             m_lastHeartbeatAt = now;
             m_hasHeartbeat = true;
-            m_status = "heartbeat ok; " + m_networkConfigurationAdapter.describeState();
+            m_status = "heartbeat ok; internet control disabled; " + m_networkConfigurationAdapter.describeState();
         } else {
             m_status = "heartbeat failed";
         }
@@ -54,7 +44,7 @@ void UplinkSync::sync(const models::ActivitySnapshot& snapshot, const std::optio
         if (focusedSent) {
             m_lastActivityAt = now;
             m_hasActivity = true;
-            m_status = "activity ok; " + m_networkConfigurationAdapter.describeState();
+            m_status = "activity ok; internet control disabled; " + m_networkConfigurationAdapter.describeState();
         } else {
             m_status = "activity failed";
         }
@@ -75,13 +65,6 @@ bool UplinkSync::uploadCameraCapture(const std::string& filePath,
 
 std::string UplinkSync::statusSummary() const {
     return m_status;
-}
-
-std::string UplinkSync::hostFromUrl(const std::string& url) {
-    auto start = url.find("://");
-    start = start == std::string::npos ? 0 : start + 3;
-    const auto end = url.find_first_of(":/", start);
-    return url.substr(start, end == std::string::npos ? std::string::npos : end - start);
 }
 
 bool UplinkSync::shouldSendHeartbeat(std::chrono::steady_clock::time_point now) const {

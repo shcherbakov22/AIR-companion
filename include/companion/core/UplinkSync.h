@@ -29,7 +29,6 @@ public:
     std::string statusSummary() const;
 
 private:
-    static std::string hostFromUrl(const std::string& url);
     bool shouldSendHeartbeat(std::chrono::steady_clock::time_point now) const;
     bool shouldSendActivity(std::chrono::steady_clock::time_point now) const;
 
