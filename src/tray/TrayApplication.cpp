@@ -2,6 +2,7 @@
 
 #include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
+#include "companion/adapters/windows/WindowsAdapters.h"
 #include "companion/tray/EnrollmentWindow.h"
 
 #include <chrono>
@@ -27,8 +28,11 @@ constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT_PTR kStatusTimerId = 1;
 constexpr int kMenuStatus = 1001;
 constexpr int kMenuSettings = 1002;
-constexpr int kMenuLogs = 1003;
-constexpr int kMenuExit = 1004;
+constexpr int kMenuInstallService = 1003;
+constexpr int kMenuStartService = 1004;
+constexpr int kMenuStopService = 1005;
+constexpr int kMenuLogs = 1006;
+constexpr int kMenuExit = 1007;
 constexpr wchar_t kTrayWindowClass[] = L"AIRCompanionTrayWindow";
 
 std::wstring utf8ToWide(const std::string& value) {
@@ -139,6 +143,33 @@ LRESULT CALLBACK trayWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM
                     );
                     return 0;
 
+                case kMenuInstallService:
+                case kMenuStartService:
+                case kMenuStopService: {
+                    companion::adapters::windows::WindowsServiceLifecycleAdapter serviceLifecycleAdapter;
+
+                    bool ok = false;
+                    const wchar_t* actionText = L"service action";
+                    if (LOWORD(wParam) == kMenuInstallService) {
+                        ok = serviceLifecycleAdapter.install();
+                        actionText = L"install service";
+                    } else if (LOWORD(wParam) == kMenuStartService) {
+                        ok = serviceLifecycleAdapter.start();
+                        actionText = L"start service";
+                    } else {
+                        ok = serviceLifecycleAdapter.stop();
+                        actionText = L"stop service";
+                    }
+
+                    MessageBoxW(
+                        window,
+                        ok ? L"Service action completed." : L"Service action failed.",
+                        actionText,
+                        MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONERROR)
+                    );
+                    return 0;
+                }
+
                 case kMenuExit:
                     DestroyWindow(window);
                     return 0;
@@ -150,6 +181,9 @@ LRESULT CALLBACK trayWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM
                 HMENU menu = CreatePopupMenu();
                 AppendMenuW(menu, MF_STRING, kMenuStatus, L"Status");
                 AppendMenuW(menu, MF_STRING, kMenuSettings, L"Settings");
+                AppendMenuW(menu, MF_STRING, kMenuInstallService, L"Install service");
+                AppendMenuW(menu, MF_STRING, kMenuStartService, L"Start service");
+                AppendMenuW(menu, MF_STRING, kMenuStopService, L"Stop service");
                 AppendMenuW(menu, MF_STRING, kMenuLogs, L"Open debug log");
                 AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
                 AppendMenuW(menu, MF_STRING, kMenuExit, L"Exit");
