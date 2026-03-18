@@ -17,13 +17,14 @@ namespace {
 
 constexpr wchar_t kWindowClassName[] = L"AIRCompanionEnrollmentWindow";
 constexpr int kWindowWidth = 460;
-constexpr int kWindowHeight = 290;
+constexpr int kWindowHeight = 338;
 
 enum ControlId : int {
     IdBaseUrl = 1001,
     IdUsername = 1002,
     IdPassword = 1003,
     IdDeviceLabel = 1004,
+    IdRootCaUrl = 1005,
     IdSave = 1101,
     IdCancel = 1102,
     IdStatus = 1201,
@@ -96,6 +97,7 @@ struct WindowState {
     HWND usernameEdit{nullptr};
     HWND passwordEdit{nullptr};
     HWND deviceLabelEdit{nullptr};
+    HWND rootCaUrlEdit{nullptr};
     HFONT font{nullptr};
 };
 
@@ -170,6 +172,7 @@ service::EnrollmentRequest collectRequest(const WindowState& state) {
     request.username = wideToUtf8(readWindowText(state.usernameEdit));
     request.password = wideToUtf8(readWindowText(state.passwordEdit));
     request.deviceLabel = wideToUtf8(readWindowText(state.deviceLabelEdit));
+    request.rootCaUrl = wideToUtf8(readWindowText(state.rootCaUrlEdit));
     return request;
 }
 
@@ -203,13 +206,16 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             createLabel(window, state->font, L"Device label", 20, 132, 120, 20);
             state->deviceLabelEdit = createEdit(window, state->font, IdDeviceLabel, utf8ToWide(state->initial.deviceLabel), 150, 130, 280, 24);
 
+            createLabel(window, state->font, L"Root CA URL", 20, 170, 120, 20);
+            state->rootCaUrlEdit = createEdit(window, state->font, IdRootCaUrl, utf8ToWide(state->initial.rootCaUrl), 150, 168, 280, 24);
+
             const auto statusText = state->statusMessage.empty()
                 ? L"Enter AIR enrollment details for this device."
                 : utf8ToWide(state->statusMessage);
-            createLabel(window, state->font, statusText.c_str(), 20, 172, 410, 34);
+            createLabel(window, state->font, statusText.c_str(), 20, 208, 410, 34);
 
-            createButton(window, state->font, IdSave, L"Enroll", 244, 220, 90, 28);
-            createButton(window, state->font, IdCancel, L"Cancel", 340, 220, 90, 28);
+            createButton(window, state->font, IdSave, L"Enroll", 244, 264, 90, 28);
+            createButton(window, state->font, IdCancel, L"Cancel", 340, 264, 90, 28);
 
             centerWindow(window);
             return 0;

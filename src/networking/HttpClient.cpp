@@ -100,7 +100,8 @@ std::wstring buildHeaderBlock(const std::map<std::string, std::string>& headers)
 HttpResponse sendRequest(const std::wstring& method,
                          const std::string& url,
                          const std::map<std::string, std::string>& headers,
-                         const std::string& body) {
+                         const std::string& body,
+                         const HttpRequestOptions& options) {
     const auto parsed = parseUrl(url);
     if (!parsed.has_value()) {
         return {0, {}};
@@ -141,7 +142,7 @@ HttpResponse sendRequest(const std::wstring& method,
     LPVOID bodyData = body.empty() ? WINHTTP_NO_REQUEST_DATA : reinterpret_cast<LPVOID>(body.empty() ? nullptr : const_cast<char*>(body.data()));
     const auto bodySize = static_cast<DWORD>(body.size());
 
-    if (parsed->secure) {
+    if (parsed->secure && options.allowInvalidCertificate) {
         DWORD securityFlags =
             SECURITY_FLAG_IGNORE_UNKNOWN_CA |
             SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
@@ -215,20 +216,25 @@ std::string basenameFromPath(const std::string& path) {
 
 }  // namespace
 
-HttpResponse HttpClient::get(const std::string& url, const std::map<std::string, std::string>& headers) const {
+HttpResponse HttpClient::get(const std::string& url,
+                             const std::map<std::string, std::string>& headers,
+                             const HttpRequestOptions& options) const {
 #ifdef _WIN32
-    return sendRequest(L"GET", url, headers, {});
+    return sendRequest(L"GET", url, headers, {}, options);
 #else
+    (void)options;
     return HttpResponse{200, "{\"stub\":true,\"url\":\"" + url + "\"}"};
 #endif
 }
 
 HttpResponse HttpClient::post(const std::string& url,
                               const std::map<std::string, std::string>& headers,
-                              const std::string& body) const {
+                              const std::string& body,
+                              const HttpRequestOptions& options) const {
 #ifdef _WIN32
-    return sendRequest(L"POST", url, headers, body);
+    return sendRequest(L"POST", url, headers, body, options);
 #else
+    (void)options;
     return HttpResponse{200, "{\"stub\":true,\"url\":\"" + url + "\",\"body\":\"" + body + "\"}"};
 #endif
 }
@@ -238,7 +244,8 @@ HttpResponse HttpClient::postMultipart(const std::string& url,
                                        const std::map<std::string, std::string>& fields,
                                        const std::string& fileFieldName,
                                        const std::string& filePath,
-                                       const std::string& contentType) const {
+                                       const std::string& contentType,
+                                       const HttpRequestOptions& options) const {
 #ifdef _WIN32
     const auto fileBytes = readFileBytes(filePath);
     if (fileBytes.empty()) {
@@ -261,7 +268,7 @@ HttpResponse HttpClient::postMultipart(const std::string& url,
 
     auto multipartHeaders = headers;
     multipartHeaders["Content-Type"] = "multipart/form-data; boundary=" + boundary;
-    return sendRequest(L"POST", url, multipartHeaders, body.str());
+    return sendRequest(L"POST", url, multipartHeaders, body.str(), options);
 #else
     (void)url;
     (void)headers;
@@ -269,6 +276,7 @@ HttpResponse HttpClient::postMultipart(const std::string& url,
     (void)fileFieldName;
     (void)filePath;
     (void)contentType;
+    (void)options;
     return {200, "{}"};
 #endif
 }

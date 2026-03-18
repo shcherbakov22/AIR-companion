@@ -86,6 +86,7 @@ std::optional<StoredCompanionConfig> CompanionConfigStore::load() const {
     StoredCompanionConfig config;
     config.baseUrl = extractJsonString(body, "base_url").value_or({});
     config.deviceToken = extractJsonString(body, "device_token").value_or({});
+    config.rootCaUrl = extractJsonString(body, "root_ca_url").value_or({});
     config.identity.deviceId = extractJsonString(body, "device_id").value_or({});
     config.identity.hostname = extractJsonString(body, "hostname").value_or({});
     config.identity.deviceLabel = extractJsonString(body, "device_label").value_or({});
@@ -117,6 +118,7 @@ bool CompanionConfigStore::save(const StoredCompanionConfig& config) const {
         << "{\n"
         << "  \"base_url\": \"" << escapeJson(config.baseUrl) << "\",\n"
         << "  \"device_token\": \"" << escapeJson(config.deviceToken) << "\",\n"
+        << "  \"root_ca_url\": \"" << escapeJson(config.rootCaUrl) << "\",\n"
         << "  \"device_id\": \"" << escapeJson(config.identity.deviceId) << "\",\n"
         << "  \"hostname\": \"" << escapeJson(config.identity.hostname) << "\",\n"
         << "  \"device_label\": \"" << escapeJson(config.identity.deviceLabel) << "\",\n"

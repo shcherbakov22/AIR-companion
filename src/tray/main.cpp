@@ -35,6 +35,7 @@ companion::service::EnrollmentRequest initialEnrollmentRequest() {
         {},
         {},
         {},
+        {},
     });
 
     if (const auto stored = configStore.load(); stored.has_value()) {
@@ -46,6 +47,9 @@ companion::service::EnrollmentRequest initialEnrollmentRequest() {
         }
         if (draft.deviceLabel.empty()) {
             draft.deviceLabel = stored->identity.deviceLabel;
+        }
+        if (draft.rootCaUrl.empty()) {
+            draft.rootCaUrl = stored->rootCaUrl;
         }
     }
 

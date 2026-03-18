@@ -6,6 +6,7 @@
 #include "companion/networking/CompanionApiClient.h"
 #include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
+#include "companion/service/TrustedRootInstaller.h"
 
 namespace companion::service {
 
@@ -26,15 +27,18 @@ private:
     static std::string defaultHostname();
     static std::string defaultDeviceLabel();
     static std::string randomDeviceKey();
+    bool ensureTrustedRoot(const std::string& baseUrl, const std::string& rootCaUrl = {}, bool required = false) const;
     std::optional<BootstrapResult> initializeFromCredentials(
         const std::string& baseUrl,
         const std::string& username,
         const std::string& password,
-        const std::string& deviceLabel
+        const std::string& deviceLabel,
+        const std::string& rootCaUrl
     ) const;
 
     CompanionConfigStore m_configStore;
     EnrollmentRequestStore m_enrollmentRequestStore;
+    TrustedRootInstaller m_trustedRootInstaller;
 };
 
 }  // namespace companion::service

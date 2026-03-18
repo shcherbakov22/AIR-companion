@@ -10,6 +10,7 @@ struct EnrollmentRequest {
     std::string username;
     std::string password;
     std::string deviceLabel;
+    std::string rootCaUrl;
 };
 
 class EnrollmentRequestStore {

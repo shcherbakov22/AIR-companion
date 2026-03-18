@@ -5,6 +5,10 @@
 
 namespace companion::networking {
 
+struct HttpRequestOptions {
+    bool allowInvalidCertificate{false};
+};
+
 struct HttpResponse {
     int statusCode{0};
     std::string body;
@@ -12,16 +16,20 @@ struct HttpResponse {
 
 class HttpClient {
 public:
-    HttpResponse get(const std::string& url, const std::map<std::string, std::string>& headers) const;
+    HttpResponse get(const std::string& url,
+                     const std::map<std::string, std::string>& headers,
+                     const HttpRequestOptions& options = {}) const;
     HttpResponse post(const std::string& url,
                       const std::map<std::string, std::string>& headers,
-                      const std::string& body) const;
+                      const std::string& body,
+                      const HttpRequestOptions& options = {}) const;
     HttpResponse postMultipart(const std::string& url,
                                const std::map<std::string, std::string>& headers,
                                const std::map<std::string, std::string>& fields,
                                const std::string& fileFieldName,
                                const std::string& filePath,
-                               const std::string& contentType) const;
+                               const std::string& contentType,
+                               const HttpRequestOptions& options = {}) const;
 };
 
 }  // namespace companion::networking

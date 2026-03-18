@@ -10,6 +10,7 @@ namespace companion::service {
 struct StoredCompanionConfig {
     std::string baseUrl;
     std::string deviceToken;
+    std::string rootCaUrl;
     models::DeviceIdentity identity;
 };
 

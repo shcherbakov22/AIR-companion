@@ -3,6 +3,7 @@
 #include "companion/networking/CompanionApiParsers.h"
 #include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
+#include "companion/service/TrustedRootInstaller.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -173,6 +174,7 @@ void testCompanionConfigStoreRoundTrip() {
     companion::service::StoredCompanionConfig config;
     config.baseUrl = "https://192.168.11.228";
     config.deviceToken = "token-abc";
+    config.rootCaUrl = "https://192.168.11.228/companion/root-ca.crt";
     config.identity.deviceId = "device-1";
     config.identity.hostname = "WINDOWS-TEST";
     config.identity.deviceLabel = "Desk PC";
@@ -185,6 +187,7 @@ void testCompanionConfigStoreRoundTrip() {
     require(loaded.has_value(), "config load");
     requireEqual(loaded->baseUrl, config.baseUrl, "config base url");
     requireEqual(loaded->deviceToken, config.deviceToken, "config token");
+    requireEqual(loaded->rootCaUrl, config.rootCaUrl, "config root ca url");
     requireEqual(loaded->identity.deviceId, config.identity.deviceId, "config device id");
     require(store.clear(), "config clear");
     require(!store.load().has_value(), "config should clear");
@@ -200,6 +203,7 @@ void testEnrollmentRequestStoreRoundTrip() {
         "ego",
         "0",
         "codex-pc",
+        "https://192.168.11.228/companion/root-ca.crt",
     };
 
     require(store.save(request), "request save");
@@ -209,10 +213,12 @@ void testEnrollmentRequestStoreRoundTrip() {
     requireEqual(draft->username, request.username, "draft username");
     requireEqual(draft->password, request.password, "draft password");
     requireEqual(draft->deviceLabel, request.deviceLabel, "draft label");
+    requireEqual(draft->rootCaUrl, request.rootCaUrl, "draft root ca url");
 
     const auto loaded = store.load();
     require(loaded.has_value(), "request load");
     requireEqual(loaded->username, request.username, "request username");
+    requireEqual(loaded->rootCaUrl, request.rootCaUrl, "request root ca url");
     require(store.clear(), "request clear");
     require(!store.loadDraft().has_value(), "request should clear");
 }
@@ -246,6 +252,26 @@ void testCaptureSchedulerRespectsMinimumsAndMarks() {
     require(scheduler.shouldCaptureCamera(start + std::chrono::seconds(20)), "camera interval reached");
 }
 
+void testTrustedRootInstallerDerivesCertificateUrl() {
+    requireEqual(
+        companion::service::TrustedRootInstaller::rootCertificateUrlForBaseUrl("https://192.168.11.228"),
+        std::string("https://192.168.11.228/companion/root-ca.crt"),
+        "https base url should derive https root cert url"
+    );
+
+    requireEqual(
+        companion::service::TrustedRootInstaller::rootCertificateUrlForBaseUrl("http://192.168.11.228"),
+        std::string("http://192.168.11.228/companion/root-ca.crt"),
+        "http base url should stay http"
+    );
+
+    requireEqual(
+        companion::service::TrustedRootInstaller::rootCertificateUrlForBaseUrl("https://192.168.11.228:8443"),
+        std::string("https://192.168.11.228:8443/companion/root-ca.crt"),
+        "custom https port should be preserved"
+    );
+}
+
 }  // namespace
 
 int main() {
@@ -261,6 +287,7 @@ int main() {
         {"companionConfigStoreRoundTrip", testCompanionConfigStoreRoundTrip},
         {"enrollmentRequestStoreRoundTrip", testEnrollmentRequestStoreRoundTrip},
         {"captureSchedulerRespectsMinimumsAndMarks", testCaptureSchedulerRespectsMinimumsAndMarks},
+        {"trustedRootInstallerDerivesCertificateUrl", testTrustedRootInstallerDerivesCertificateUrl},
     };
 
     int failures = 0;

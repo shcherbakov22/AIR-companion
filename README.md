@@ -22,8 +22,10 @@ This directory contains the initial implementation scaffold for the new companio
 - heartbeat and activity uplink wiring for the AIR companion API
 - network identity collection and Windows gateway/DNS adapter scaffolding
 - persisted local config under `%APPDATA%\\AIRCompanion\\config.json`
+- optional root CA download URL persisted with the local config
 - hidden internal capture settings under `%PROGRAMDATA%\\AIRCompanion\\Internal\\capture-settings.json`
 - first-run bootstrap through a native enrollment window in the tray app
+- Windows trusted-root bootstrap for the AIR platform certificate
 - service host entry point
 - tray app entry point
 - Visual Studio-friendly CMake build files
@@ -90,8 +92,10 @@ This app targets only the current AIR platform. It expects the companion API gro
 - V1 is Windows-first and structured for Linux adapters later.
 - Internet policy is currently paused; the companion reports network identity but does not rewrite gateway or DNS.
 - First enrollment now happens through a small native window when the tray starts without a saved config.
+- Enrollment/settings can also carry an optional root CA URL when the AIR platform serves its trusted root certificate from a custom endpoint.
 - You can reopen enrollment settings on an installed machine with:
   - `air_companion_tray --settings`
+- Headless bootstrap also accepts `AIR_COMPANION_ROOT_CA_URL` for the same override.
 - Screen/camera capture behavior is also driven by a separate hidden machine-level settings file for:
   - local capture enablement
   - minimum capture intervals
