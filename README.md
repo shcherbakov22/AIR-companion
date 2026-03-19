@@ -26,7 +26,7 @@ This directory contains the initial implementation scaffold for the new companio
 - hidden internal capture settings under `%PROGRAMDATA%\\AIRCompanion\\Internal\\capture-settings.json`
 - first-run bootstrap through a native enrollment window in the tray app
 - Windows trusted-root bootstrap for the AIR platform certificate
-- automatic boot-start registration through a Windows `ONSTART` scheduled task
+- automatic boot-start registration through a Windows scheduled task with boot and wake-from-sleep triggers
 - service host entry point
 - tray app entry point
 - Visual Studio-friendly CMake build files
@@ -94,7 +94,7 @@ This app targets only the current AIR platform. It expects the companion API gro
 - Internet policy is currently paused; the companion reports network identity but does not rewrite gateway or DNS.
 - First enrollment now happens through a small native window when the tray starts without a saved config.
 - Enrollment/settings can also carry an optional root CA URL when the AIR platform serves its trusted root certificate from a custom endpoint.
-- Successful tray/service startup now re-registers automatic boot start by default for `air_companion_service.exe`.
+- Successful tray/service startup now re-registers automatic startup by default for `air_companion_service.exe`, with both boot and wake-from-sleep triggers.
 - You can reopen enrollment settings on an installed machine with:
   - `air_companion_tray --settings`
 - Headless bootstrap also accepts `AIR_COMPANION_ROOT_CA_URL` for the same override.

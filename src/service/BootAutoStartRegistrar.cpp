@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #ifdef _WIN32
@@ -109,12 +110,31 @@ bool BootAutoStartRegistrar::ensureEnabled() const {
     }
 
     const auto wideTaskName = utf8ToWide(taskName());
-    const auto wideServicePath = utf8ToWide(servicePath);
+    const auto xmlPath = std::filesystem::temp_directory_path() / "air-companion-startup-task.xml";
+    {
+        std::ofstream output(xmlPath, std::ios::binary | std::ios::trunc);
+        if (!output.is_open()) {
+            return false;
+        }
+
+        const auto taskXml = utf8ToWide(taskXmlForServiceBinary(servicePath));
+        constexpr unsigned char bom[] = {0xFF, 0xFE};
+        output.write(reinterpret_cast<const char*>(bom), sizeof(bom));
+        output.write(
+            reinterpret_cast<const char*>(taskXml.data()),
+            static_cast<std::streamsize>(taskXml.size() * sizeof(wchar_t))
+        );
+    }
+
+    const auto wideXmlPath = utf8ToWide(xmlPath.string());
     const std::wstring commandLine =
         L"schtasks.exe /Create /TN \"" + wideTaskName
-        + L"\" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR \"\\\"" + wideServicePath + L"\\\"\" /F";
+        + L"\" /XML \"" + wideXmlPath + L"\" /F";
 
-    return runProcess(commandLine);
+    const auto created = runProcess(commandLine);
+    std::error_code errorCode;
+    std::filesystem::remove(xmlPath, errorCode);
+    return created;
 #else
     return false;
 #endif
@@ -140,6 +160,56 @@ std::string BootAutoStartRegistrar::serviceBinaryPathForExecutable(const std::st
 
     path.replace_filename("air_companion_service.exe");
     return path.string();
+}
+
+std::string BootAutoStartRegistrar::taskXmlForServiceBinary(const std::string& serviceBinaryPath) {
+    return
+        "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n"
+        "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n"
+        "  <RegistrationInfo>\n"
+        "    <Author>AIR Companion</Author>\n"
+        "    <URI>\\" + taskName() + "</URI>\n"
+        "  </RegistrationInfo>\n"
+        "  <Principals>\n"
+        "    <Principal id=\"Author\">\n"
+        "      <UserId>S-1-5-18</UserId>\n"
+        "      <RunLevel>HighestAvailable</RunLevel>\n"
+        "    </Principal>\n"
+        "  </Principals>\n"
+        "  <Settings>\n"
+        "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n"
+        "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n"
+        "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n"
+        "    <AllowHardTerminate>true</AllowHardTerminate>\n"
+        "    <StartWhenAvailable>true</StartWhenAvailable>\n"
+        "    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>\n"
+        "    <AllowStartOnDemand>true</AllowStartOnDemand>\n"
+        "    <Enabled>true</Enabled>\n"
+        "    <Hidden>false</Hidden>\n"
+        "    <RunOnlyIfIdle>false</RunOnlyIfIdle>\n"
+        "    <WakeToRun>false</WakeToRun>\n"
+        "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n"
+        "    <Priority>5</Priority>\n"
+        "    <RestartOnFailure>\n"
+        "      <Interval>PT1M</Interval>\n"
+        "      <Count>3</Count>\n"
+        "    </RestartOnFailure>\n"
+        "  </Settings>\n"
+        "  <Triggers>\n"
+        "    <BootTrigger>\n"
+        "      <Enabled>true</Enabled>\n"
+        "    </BootTrigger>\n"
+        "    <EventTrigger>\n"
+        "      <Enabled>true</Enabled>\n"
+        "      <Subscription>&lt;QueryList&gt;&lt;Query Id=\"0\" Path=\"System\"&gt;&lt;Select Path=\"System\"&gt;*[System[Provider[@Name='Power-Troubleshooter'] and (EventID=1)]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>\n"
+        "    </EventTrigger>\n"
+        "  </Triggers>\n"
+        "  <Actions Context=\"Author\">\n"
+        "    <Exec>\n"
+        "      <Command>" + serviceBinaryPath + "</Command>\n"
+        "    </Exec>\n"
+        "  </Actions>\n"
+        "</Task>\n";
 }
 
 }  // namespace companion::service

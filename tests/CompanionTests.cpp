@@ -295,6 +295,14 @@ void testBootAutoStartRegistrarResolvesServiceBinaryPath() {
         std::string("C:\\Users\\user\\codex\\air-companion\\build\\windows-debug\\Debug\\air_companion_service.exe"),
         "service executable should preserve itself"
     );
+
+    const auto taskXml = companion::service::BootAutoStartRegistrar::taskXmlForServiceBinary(
+        "C:\\Users\\user\\codex\\air-companion\\build\\windows-debug\\Debug\\air_companion_service.exe"
+    );
+    require(taskXml.find("<BootTrigger>") != std::string::npos, "task xml should include boot trigger");
+    require(taskXml.find("Power-Troubleshooter") != std::string::npos, "task xml should include resume event trigger");
+    require(taskXml.find("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>") != std::string::npos, "task xml should not stop on battery");
+    require(taskXml.find("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>") != std::string::npos, "task xml should remove execution time limit");
 }
 
 }  // namespace
