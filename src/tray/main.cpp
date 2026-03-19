@@ -6,7 +6,6 @@
 #include "companion/core/PolicySync.h"
 #include "companion/networking/CompanionApiClient.h"
 #include "companion/service/Bootstrap.h"
-#include "companion/service/BootAutoStartRegistrar.h"
 #include "companion/service/CaptureSettingsStore.h"
 #include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
@@ -97,9 +96,9 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    companion::service::BootAutoStartRegistrar bootAutoStartRegistrar;
-    if (!bootAutoStartRegistrar.ensureEnabled()) {
-        std::cerr << "AIR Companion could not register automatic boot start." << '\n';
+    companion::adapters::windows::WindowsServiceLifecycleAdapter serviceLifecycleAdapter;
+    if (!serviceLifecycleAdapter.install()) {
+        std::cerr << "AIR Companion could not install the Windows service for automatic startup." << '\n';
     }
 
     companion::adapters::windows::WindowsAppTrackerAdapter appTrackerAdapter;

@@ -6,7 +6,6 @@
 #include "companion/core/PolicySync.h"
 #include "companion/networking/CompanionApiClient.h"
 #include "companion/service/Bootstrap.h"
-#include "companion/service/BootAutoStartRegistrar.h"
 #include "companion/service/CaptureSettingsStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
 #include "companion/service/ServiceHost.h"
@@ -24,9 +23,6 @@ int main() {
                   << " or set AIR_COMPANION_USERNAME, AIR_COMPANION_PASSWORD, and optional AIR_COMPANION_ROOT_CA_URL for first enrollment." << '\n';
         return 1;
     }
-
-    companion::service::BootAutoStartRegistrar bootAutoStartRegistrar;
-    (void) bootAutoStartRegistrar.ensureEnabled();
 
     companion::adapters::windows::WindowsAppTrackerAdapter appTrackerAdapter;
     companion::adapters::windows::WindowsBrowserDomainAdapter browserDomainAdapter;

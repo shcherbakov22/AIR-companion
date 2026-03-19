@@ -1,4 +1,5 @@
 #include "companion/adapters/windows/WindowsAdapters.h"
+#include "companion/service/BootAutoStartRegistrar.h"
 
 #ifdef _WIN32
 #include <string>
@@ -21,6 +22,35 @@ std::wstring currentBinaryPath() {
     return path;
 }
 
+bool deleteLegacyStartupTask() {
+    STARTUPINFOW startupInfo{};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInformation{};
+    std::wstring commandLine = L"schtasks.exe /Delete /TN \"AIR Companion\" /F";
+
+    const auto created = CreateProcessW(
+        nullptr,
+        commandLine.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &startupInfo,
+        &processInformation
+    );
+
+    if (!created) {
+        return false;
+    }
+
+    WaitForSingleObject(processInformation.hProcess, INFINITE);
+    CloseHandle(processInformation.hThread);
+    CloseHandle(processInformation.hProcess);
+    return true;
+}
+
 }  // namespace
 #endif
 
@@ -29,7 +59,32 @@ namespace companion::adapters::windows {
 bool WindowsServiceLifecycleAdapter::install() {
 #ifdef _WIN32
     const auto binaryPath = currentBinaryPath();
-    if (binaryPath.empty()) {
+    const auto serviceBinaryPath = companion::service::BootAutoStartRegistrar::serviceBinaryPathForExecutable(
+        [&binaryPath] {
+            const int required = WideCharToMultiByte(CP_UTF8, 0, binaryPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            if (required <= 1) {
+                return std::string{};
+            }
+
+            std::string converted(static_cast<std::size_t>(required - 1), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, binaryPath.c_str(), -1, converted.data(), required, nullptr, nullptr);
+            return converted;
+        }()
+    );
+    if (serviceBinaryPath.empty()) {
+        return false;
+    }
+    const auto serviceBinaryWide = [&serviceBinaryPath] {
+        const int required = MultiByteToWideChar(CP_UTF8, 0, serviceBinaryPath.c_str(), -1, nullptr, 0);
+        if (required <= 1) {
+            return std::wstring{};
+        }
+
+        std::wstring converted(static_cast<std::size_t>(required - 1), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, serviceBinaryPath.c_str(), -1, converted.data(), required);
+        return converted;
+    }();
+    if (serviceBinaryWide.empty()) {
         return false;
     }
 
@@ -46,7 +101,7 @@ bool WindowsServiceLifecycleAdapter::install() {
         SERVICE_WIN32_OWN_PROCESS,
         SERVICE_AUTO_START,
         SERVICE_ERROR_NORMAL,
-        binaryPath.c_str(),
+        serviceBinaryWide.c_str(),
         nullptr,
         nullptr,
         nullptr,
@@ -61,7 +116,7 @@ bool WindowsServiceLifecycleAdapter::install() {
                 SERVICE_NO_CHANGE,
                 SERVICE_AUTO_START,
                 SERVICE_NO_CHANGE,
-                binaryPath.c_str(),
+                serviceBinaryWide.c_str(),
                 nullptr,
                 nullptr,
                 nullptr,
@@ -73,6 +128,7 @@ bool WindowsServiceLifecycleAdapter::install() {
 
     const bool ok = service != nullptr;
     if (service != nullptr) {
+        deleteLegacyStartupTask();
         CloseServiceHandle(service);
     }
 
