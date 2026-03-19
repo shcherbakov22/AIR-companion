@@ -6,6 +6,7 @@
 #include "companion/core/PolicySync.h"
 #include "companion/networking/CompanionApiClient.h"
 #include "companion/service/Bootstrap.h"
+#include "companion/service/BootAutoStartRegistrar.h"
 #include "companion/service/CaptureSettingsStore.h"
 #include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
@@ -94,6 +95,11 @@ int main(int argc, char* argv[]) {
             std::cerr << "AIR Companion tray bootstrap failed after enrollment attempt." << '\n';
             return 1;
         }
+    }
+
+    companion::service::BootAutoStartRegistrar bootAutoStartRegistrar;
+    if (!bootAutoStartRegistrar.ensureEnabled()) {
+        std::cerr << "AIR Companion could not register automatic boot start." << '\n';
     }
 
     companion::adapters::windows::WindowsAppTrackerAdapter appTrackerAdapter;

@@ -1,6 +1,7 @@
 #include "companion/core/CaptureScheduler.h"
 #include "companion/models/DevicePolicy.h"
 #include "companion/networking/CompanionApiParsers.h"
+#include "companion/service/BootAutoStartRegistrar.h"
 #include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
 #include "companion/service/TrustedRootInstaller.h"
@@ -272,6 +273,30 @@ void testTrustedRootInstallerDerivesCertificateUrl() {
     );
 }
 
+void testBootAutoStartRegistrarResolvesServiceBinaryPath() {
+    requireEqual(
+        companion::service::BootAutoStartRegistrar::taskName(),
+        std::string("AIR Companion"),
+        "boot task name"
+    );
+
+    requireEqual(
+        companion::service::BootAutoStartRegistrar::serviceBinaryPathForExecutable(
+            "C:\\Users\\user\\codex\\air-companion\\build\\windows-debug\\Debug\\air_companion_tray.exe"
+        ),
+        std::string("C:\\Users\\user\\codex\\air-companion\\build\\windows-debug\\Debug\\air_companion_service.exe"),
+        "tray executable should resolve to sibling service executable"
+    );
+
+    requireEqual(
+        companion::service::BootAutoStartRegistrar::serviceBinaryPathForExecutable(
+            "C:\\Users\\user\\codex\\air-companion\\build\\windows-debug\\Debug\\air_companion_service.exe"
+        ),
+        std::string("C:\\Users\\user\\codex\\air-companion\\build\\windows-debug\\Debug\\air_companion_service.exe"),
+        "service executable should preserve itself"
+    );
+}
+
 }  // namespace
 
 int main() {
@@ -288,6 +313,7 @@ int main() {
         {"enrollmentRequestStoreRoundTrip", testEnrollmentRequestStoreRoundTrip},
         {"captureSchedulerRespectsMinimumsAndMarks", testCaptureSchedulerRespectsMinimumsAndMarks},
         {"trustedRootInstallerDerivesCertificateUrl", testTrustedRootInstallerDerivesCertificateUrl},
+        {"bootAutoStartRegistrarResolvesServiceBinaryPath", testBootAutoStartRegistrarResolvesServiceBinaryPath},
     };
 
     int failures = 0;
