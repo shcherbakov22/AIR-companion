@@ -113,14 +113,17 @@ bool WindowsNetworkConfigurationAdapter::ensureAirGateway(const std::string& gat
         return false;
     }
 
-    if (m_currentIdentity.gatewayIpv4 == gatewayIpv4 && m_currentIdentity.dnsIpv4 == dnsIpv4) {
+    if (m_currentIdentity.gatewayIpv4 == gatewayIpv4
+        && (dnsIpv4.empty() || m_currentIdentity.dnsIpv4 == dnsIpv4)) {
         m_currentIdentity.configuredThroughAirGateway = true;
-        m_state = "gateway " + gatewayIpv4 + " dns " + dnsIpv4;
+        m_state = dnsIpv4.empty()
+            ? "gateway " + gatewayIpv4
+            : "gateway " + gatewayIpv4 + " dns " + dnsIpv4;
         return true;
     }
 
     const bool routeApplied = applyDefaultRoute(gatewayIpv4);
-    const bool dnsApplied = applyDnsServer(dnsIpv4);
+    const bool dnsApplied = dnsIpv4.empty() || applyDnsServer(dnsIpv4);
 
     if (!routeApplied || !dnsApplied) {
         m_state = "gateway apply failed";
@@ -128,9 +131,13 @@ bool WindowsNetworkConfigurationAdapter::ensureAirGateway(const std::string& gat
     }
 
     m_currentIdentity.gatewayIpv4 = gatewayIpv4;
-    m_currentIdentity.dnsIpv4 = dnsIpv4;
+    if (!dnsIpv4.empty()) {
+        m_currentIdentity.dnsIpv4 = dnsIpv4;
+    }
     m_currentIdentity.configuredThroughAirGateway = true;
-    m_state = "gateway " + gatewayIpv4 + " dns " + dnsIpv4;
+    m_state = dnsIpv4.empty()
+        ? "gateway " + gatewayIpv4
+        : "gateway " + gatewayIpv4 + " dns " + dnsIpv4;
     return true;
 }
 

@@ -17,6 +17,10 @@ namespace companion::adapters::windows {
 class WindowsScreenCaptureAdapter final : public IScreenCaptureAdapter {
 public:
     std::optional<std::string> captureToFile(const std::string& outputDirectory) override;
+
+private:
+    std::optional<std::string> captureInteractive(const std::string& outputDirectory) const;
+    std::optional<std::string> captureViaActiveSessionHelper(const std::string& outputDirectory) const;
 };
 
 class WindowsCameraCaptureAdapter final : public ICameraCaptureAdapter {

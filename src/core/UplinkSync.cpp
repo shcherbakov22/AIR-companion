@@ -1,6 +1,7 @@
 #include "companion/core/UplinkSync.h"
 
 #include <chrono>
+#include <regex>
 #include <utility>
 
 namespace companion::core {
@@ -23,7 +24,16 @@ UplinkSync::UplinkSync(networking::CompanionApiClient apiClient,
 
 void UplinkSync::sync(const models::ActivitySnapshot& snapshot, const std::optional<models::DevicePolicy>& policy) {
     auto updatedSnapshot = snapshot;
-    (void) policy;
+
+    if (const auto gatewayIpv4 = gatewayHostIpv4(); gatewayIpv4.has_value()) {
+        if (m_networkConfigurationAdapter.ensureAirGateway(*gatewayIpv4, {})) {
+            m_status = "gateway enforced to " + *gatewayIpv4;
+        } else {
+            m_status = "gateway enforcement failed";
+        }
+    } else {
+        (void) policy;
+    }
 
     updatedSnapshot.networkIdentity = m_networkConfigurationAdapter.currentIdentity();
 
@@ -33,7 +43,7 @@ void UplinkSync::sync(const models::ActivitySnapshot& snapshot, const std::optio
         if (m_apiClient.sendHeartbeat(m_deviceToken, m_identity, updatedSnapshot, m_networkConfigurationAdapter.describeState())) {
             m_lastHeartbeatAt = now;
             m_hasHeartbeat = true;
-            m_status = "heartbeat ok; internet control disabled; " + m_networkConfigurationAdapter.describeState();
+            m_status = "heartbeat ok; " + m_networkConfigurationAdapter.describeState();
         } else {
             m_status = "heartbeat failed";
         }
@@ -44,7 +54,7 @@ void UplinkSync::sync(const models::ActivitySnapshot& snapshot, const std::optio
         if (focusedSent) {
             m_lastActivityAt = now;
             m_hasActivity = true;
-            m_status = "activity ok; internet control disabled; " + m_networkConfigurationAdapter.describeState();
+            m_status = "activity ok; " + m_networkConfigurationAdapter.describeState();
         } else {
             m_status = "activity failed";
         }
@@ -73,6 +83,24 @@ bool UplinkSync::shouldSendHeartbeat(std::chrono::steady_clock::time_point now) 
 
 bool UplinkSync::shouldSendActivity(std::chrono::steady_clock::time_point now) const {
     return !m_hasActivity || (now - m_lastActivityAt) >= kActivityInterval;
+}
+
+std::optional<std::string> UplinkSync::gatewayHostIpv4() const {
+    static const std::regex kBaseUrlPattern(R"(^https?://([^/:]+))", std::regex::icase);
+    static const std::regex kIpv4Pattern(R"(^(\d{1,3}\.){3}\d{1,3}$)");
+
+    std::smatch match;
+    const auto& baseUrl = m_apiClient.baseUrl();
+    if (!std::regex_search(baseUrl, match, kBaseUrlPattern) || match.size() < 2) {
+        return std::nullopt;
+    }
+
+    const std::string host = match[1].str();
+    if (!std::regex_match(host, kIpv4Pattern)) {
+        return std::nullopt;
+    }
+
+    return host;
 }
 
 }  // namespace companion::core

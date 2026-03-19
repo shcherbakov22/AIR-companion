@@ -129,12 +129,35 @@ void hidePathOnWindows(const std::string& path) {
 #endif
 }
 
+std::string defaultCaptureBaseDirectory() {
+    if (const auto* programData = std::getenv("PROGRAMDATA"); programData != nullptr && *programData != '\0') {
+        return std::string(programData) + "\\AIRCompanion\\Captures";
+    }
+
+    return ".\\AIRCompanion\\Captures";
+}
+
+std::string normalizeOutputDirectory(const std::string& configuredPath) {
+    if (configuredPath.empty()) {
+        return defaultCaptureBaseDirectory();
+    }
+
+    std::filesystem::path path(configuredPath);
+    if (path.is_absolute()) {
+        return path.string();
+    }
+
+    return (std::filesystem::path(defaultCaptureBaseDirectory()) / path).string();
+}
+
 }  // namespace
 
 InternalCaptureSettings CaptureSettingsStore::loadOrCreate() const {
     std::ifstream input(settingsPath(), std::ios::binary);
     if (!input.is_open()) {
         InternalCaptureSettings defaults;
+        defaults.screenOutputDirectory = normalizeOutputDirectory(defaults.screenOutputDirectory);
+        defaults.cameraOutputDirectory = normalizeOutputDirectory(defaults.cameraOutputDirectory);
         (void)save(defaults);
         return defaults;
     }
@@ -148,8 +171,8 @@ InternalCaptureSettings CaptureSettingsStore::loadOrCreate() const {
     settings.allowCameraCapture = extractJsonBool(body, "allow_camera_capture").value_or(settings.allowCameraCapture);
     settings.minimumScreenIntervalSeconds = extractJsonInt(body, "minimum_screen_interval_seconds").value_or(settings.minimumScreenIntervalSeconds);
     settings.minimumCameraIntervalSeconds = extractJsonInt(body, "minimum_camera_interval_seconds").value_or(settings.minimumCameraIntervalSeconds);
-    settings.screenOutputDirectory = extractJsonString(body, "screen_output_directory").value_or(settings.screenOutputDirectory);
-    settings.cameraOutputDirectory = extractJsonString(body, "camera_output_directory").value_or(settings.cameraOutputDirectory);
+    settings.screenOutputDirectory = normalizeOutputDirectory(extractJsonString(body, "screen_output_directory").value_or(settings.screenOutputDirectory));
+    settings.cameraOutputDirectory = normalizeOutputDirectory(extractJsonString(body, "camera_output_directory").value_or(settings.cameraOutputDirectory));
     settings.screenContentType = extractJsonString(body, "screen_content_type").value_or(settings.screenContentType);
     settings.cameraContentType = extractJsonString(body, "camera_content_type").value_or(settings.cameraContentType);
     return settings;
@@ -176,8 +199,8 @@ bool CaptureSettingsStore::save(const InternalCaptureSettings& settings) const {
         << "  \"allow_camera_capture\": " << (settings.allowCameraCapture ? "true" : "false") << ",\n"
         << "  \"minimum_screen_interval_seconds\": " << settings.minimumScreenIntervalSeconds << ",\n"
         << "  \"minimum_camera_interval_seconds\": " << settings.minimumCameraIntervalSeconds << ",\n"
-        << "  \"screen_output_directory\": \"" << escapeJson(settings.screenOutputDirectory) << "\",\n"
-        << "  \"camera_output_directory\": \"" << escapeJson(settings.cameraOutputDirectory) << "\",\n"
+        << "  \"screen_output_directory\": \"" << escapeJson(normalizeOutputDirectory(settings.screenOutputDirectory)) << "\",\n"
+        << "  \"camera_output_directory\": \"" << escapeJson(normalizeOutputDirectory(settings.cameraOutputDirectory)) << "\",\n"
         << "  \"screen_content_type\": \"" << escapeJson(settings.screenContentType) << "\",\n"
         << "  \"camera_content_type\": \"" << escapeJson(settings.cameraContentType) << "\"\n"
         << "}\n";

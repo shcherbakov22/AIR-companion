@@ -31,6 +31,7 @@ public:
 private:
     bool shouldSendHeartbeat(std::chrono::steady_clock::time_point now) const;
     bool shouldSendActivity(std::chrono::steady_clock::time_point now) const;
+    std::optional<std::string> gatewayHostIpv4() const;
 
     networking::CompanionApiClient m_apiClient;
     std::string m_deviceToken;
