@@ -27,11 +27,7 @@ std::optional<BootstrapResult> Bootstrap::initialize() const {
             };
         }
 
-        return BootstrapResult{
-            std::move(apiClient),
-            *stored,
-            "loaded saved enrollment",
-        };
+        (void) m_configStore.clear();
     }
 
     if (const auto request = m_enrollmentRequestStore.load(); request.has_value()) {
