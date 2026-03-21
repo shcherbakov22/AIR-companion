@@ -29,6 +29,8 @@ struct RemoteContext {
     std::vector<std::uint8_t> frameBuffer;
     int width{0};
     int height{0};
+    int sourceWidth{0};
+    int sourceHeight{0};
     int originX{0};
     int originY{0};
     int buttonMask{0};
@@ -36,6 +38,9 @@ struct RemoteContext {
     bool controlDown{false};
     bool altDown{false};
 };
+
+constexpr int kMaxRemoteWidth = 1280;
+constexpr int kMaxRemoteHeight = 720;
 
 std::wstring utf8ToWide(const std::string& value) {
     if (value.empty()) {
@@ -61,6 +66,23 @@ void writeStateFile(const std::string& path, int port) {
 void removeStateFile(const std::string& path) {
     std::error_code errorCode;
     std::filesystem::remove(path, errorCode);
+}
+
+void updateTargetDimensions(RemoteContext& context) {
+    context.sourceWidth = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    context.sourceHeight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (context.sourceWidth <= 0 || context.sourceHeight <= 0) {
+        context.width = 0;
+        context.height = 0;
+        return;
+    }
+
+    const double widthScale = static_cast<double>(kMaxRemoteWidth) / static_cast<double>(context.sourceWidth);
+    const double heightScale = static_cast<double>(kMaxRemoteHeight) / static_cast<double>(context.sourceHeight);
+    const double scale = min(1.0, min(widthScale, heightScale));
+
+    context.width = max(1, static_cast<int>(context.sourceWidth * scale));
+    context.height = max(1, static_cast<int>(context.sourceHeight * scale));
 }
 
 BOOL WINAPI consoleHandler(DWORD signal) {
@@ -242,11 +264,17 @@ void pointerEvent(int buttonMask, int x, int y, rfbClientPtr client) {
     const int screenHeight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
     const int clampedX = max(0, min(x, context->width - 1));
     const int clampedY = max(0, min(y, context->height - 1));
+    const int mappedX = context->width > 1
+        ? MulDiv(clampedX, context->sourceWidth - 1, context->width - 1)
+        : 0;
+    const int mappedY = context->height > 1
+        ? MulDiv(clampedY, context->sourceHeight - 1, context->height - 1)
+        : 0;
 
     INPUT moveInput{};
     moveInput.type = INPUT_MOUSE;
-    moveInput.mi.dx = MulDiv(clampedX, 65535, screenWidth - 1);
-    moveInput.mi.dy = MulDiv(clampedY, 65535, screenHeight - 1);
+    moveInput.mi.dx = MulDiv(mappedX, 65535, screenWidth - 1);
+    moveInput.mi.dy = MulDiv(mappedY, 65535, screenHeight - 1);
     moveInput.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
     SendInput(1, &moveInput, sizeof(INPUT));
 
@@ -279,9 +307,8 @@ void pointerEvent(int buttonMask, int x, int y, rfbClientPtr client) {
 bool captureFrame(RemoteContext& context) {
     context.originX = GetSystemMetrics(SM_XVIRTUALSCREEN);
     context.originY = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    context.width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    context.height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-    if (context.width <= 0 || context.height <= 0) {
+    updateTargetDimensions(context);
+    if (context.width <= 0 || context.height <= 0 || context.sourceWidth <= 0 || context.sourceHeight <= 0) {
         return false;
     }
 
@@ -297,25 +324,34 @@ bool captureFrame(RemoteContext& context) {
     }
 
     HDC memoryDc = CreateCompatibleDC(screenDc);
-    HBITMAP bitmap = CreateCompatibleBitmap(screenDc, context.width, context.height);
-    if (memoryDc == nullptr || bitmap == nullptr) {
-        if (bitmap != nullptr) {
-            DeleteObject(bitmap);
+    HDC scaledDc = CreateCompatibleDC(screenDc);
+    HBITMAP sourceBitmap = CreateCompatibleBitmap(screenDc, context.sourceWidth, context.sourceHeight);
+    HBITMAP scaledBitmap = CreateCompatibleBitmap(screenDc, context.width, context.height);
+    if (memoryDc == nullptr || scaledDc == nullptr || sourceBitmap == nullptr || scaledBitmap == nullptr) {
+        if (sourceBitmap != nullptr) {
+            DeleteObject(sourceBitmap);
+        }
+        if (scaledBitmap != nullptr) {
+            DeleteObject(scaledBitmap);
         }
         if (memoryDc != nullptr) {
             DeleteDC(memoryDc);
+        }
+        if (scaledDc != nullptr) {
+            DeleteDC(scaledDc);
         }
         ReleaseDC(nullptr, screenDc);
         return false;
     }
 
-    HGDIOBJ previousObject = SelectObject(memoryDc, bitmap);
+    HGDIOBJ previousSourceObject = SelectObject(memoryDc, sourceBitmap);
+    HGDIOBJ previousScaledObject = SelectObject(scaledDc, scaledBitmap);
     const BOOL copied = BitBlt(
         memoryDc,
         0,
         0,
-        context.width,
-        context.height,
+        context.sourceWidth,
+        context.sourceHeight,
         screenDc,
         context.originX,
         context.originY,
@@ -330,10 +366,24 @@ bool captureFrame(RemoteContext& context) {
     bitmapInfo.bmiHeader.biBitCount = 32;
     bitmapInfo.bmiHeader.biCompression = BI_RGB;
 
-    if (copied) {
+    const BOOL scaled = copied && StretchBlt(
+        scaledDc,
+        0,
+        0,
+        context.width,
+        context.height,
+        memoryDc,
+        0,
+        0,
+        context.sourceWidth,
+        context.sourceHeight,
+        SRCCOPY
+    );
+
+    if (scaled) {
         GetDIBits(
-            memoryDc,
-            bitmap,
+            scaledDc,
+            scaledBitmap,
             0,
             static_cast<UINT>(context.height),
             context.frameBuffer.data(),
@@ -342,12 +392,15 @@ bool captureFrame(RemoteContext& context) {
         );
     }
 
-    SelectObject(memoryDc, previousObject);
-    DeleteObject(bitmap);
+    SelectObject(memoryDc, previousSourceObject);
+    SelectObject(scaledDc, previousScaledObject);
+    DeleteObject(sourceBitmap);
+    DeleteObject(scaledBitmap);
     DeleteDC(memoryDc);
+    DeleteDC(scaledDc);
     ReleaseDC(nullptr, screenDc);
 
-    if (!copied) {
+    if (!scaled) {
         return false;
     }
 
@@ -362,8 +415,7 @@ int runRemoteControlHelper(int port, const std::string& stateFilePath) {
 #ifdef _WIN32
     SetConsoleCtrlHandler(consoleHandler, TRUE);
     RemoteContext context;
-    context.width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    context.height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    updateTargetDimensions(context);
     if (context.width <= 0 || context.height <= 0) {
         return 1;
     }
