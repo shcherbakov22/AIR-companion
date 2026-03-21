@@ -20,7 +20,9 @@ bool WindowsRemoteAccessAdapter::ensureEnabled(const std::string& username, cons
     const bool userOk = localUserExists(username)
         ? runCommand("powershell -NoProfile -NonInteractive -Command \"Set-LocalUser -Name " + quoteForPowerShell(username) + " -Password (" + securePassword + ")\"")
         : runCommand("powershell -NoProfile -NonInteractive -Command \"New-LocalUser -Name " + quoteForPowerShell(username) + " -Password (" + securePassword + ") -AccountNeverExpires\"");
-    const bool rdpOk = runCommand("reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\" /v fDenyTSConnections /t REG_DWORD /d 0 /f");
+    const bool rdpOk = runCommand("reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\" /v fDenyTSConnections /t REG_DWORD /d 0 /f")
+        && runCommand("reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\" /v StartRCM /t REG_DWORD /d 1 /f")
+        && runCommand("reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\" /v TSUserEnabled /t REG_DWORD /d 1 /f");
     const bool firewallOk = runCommand("netsh advfirewall firewall set rule group=\"remote desktop\" new enable=Yes");
     const bool groupOk = runCommand("powershell -NoProfile -NonInteractive -Command \"Add-LocalGroupMember -Group 'Remote Desktop Users' -Member " + quoteForPowerShell(username) + " -ErrorAction SilentlyContinue\"")
         || runCommand("powershell -NoProfile -NonInteractive -Command \"Add-LocalGroupMember -Group 'Administrators' -Member " + quoteForPowerShell(username) + " -ErrorAction SilentlyContinue\"");
