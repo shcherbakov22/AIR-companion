@@ -245,8 +245,8 @@ void pointerEvent(int buttonMask, int x, int y, rfbClientPtr client) {
 
     INPUT moveInput{};
     moveInput.type = INPUT_MOUSE;
-    moveInput.mi.dx = MulDiv(clampedX + context->originX, 65535, screenWidth - 1);
-    moveInput.mi.dy = MulDiv(clampedY + context->originY, 65535, screenHeight - 1);
+    moveInput.mi.dx = MulDiv(clampedX, 65535, screenWidth - 1);
+    moveInput.mi.dy = MulDiv(clampedY, 65535, screenHeight - 1);
     moveInput.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
     SendInput(1, &moveInput, sizeof(INPUT));
 
