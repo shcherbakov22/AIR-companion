@@ -417,8 +417,4 @@ bool WindowsRemoteAccessAdapter::runCommand(const std::string& command) {
 #endif
 }
 
-std::string WindowsRemoteAccessAdapter::quoteForCommand(const std::string& value) {
-    return "\"" + value + "\"";
-}
-
 }  // namespace companion::adapters::windows

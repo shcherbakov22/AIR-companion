@@ -153,21 +153,6 @@ struct RemoteContext {
     bool altDown{false};
 };
 
-std::wstring utf8ToWide(const std::string& value) {
-    if (value.empty()) {
-        return {};
-    }
-
-    const auto required = MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, nullptr, 0);
-    if (required <= 1) {
-        return {};
-    }
-
-    std::wstring result(static_cast<std::size_t>(required - 1), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, result.data(), required);
-    return result;
-}
-
 void writeStateFile(const std::string& path, int port) {
     std::filesystem::create_directories(std::filesystem::path(path).parent_path());
     std::ofstream output(path, std::ios::trunc);
