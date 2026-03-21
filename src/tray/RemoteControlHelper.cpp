@@ -476,7 +476,7 @@ bool captureFrameWithDuplication(RemoteContext& context, DesktopDuplicator& dupl
     ComPtr<IDXGIResource> desktopResource;
     HRESULT hr = duplicator.duplication->AcquireNextFrame(16, &frameInfo, &desktopResource);
     if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-        return true;
+        return false;
     }
     if (hr == DXGI_ERROR_ACCESS_LOST) {
         return duplicator.reinitialize();
@@ -530,7 +530,29 @@ bool captureFrameWithDuplication(RemoteContext& context, DesktopDuplicator& dupl
     duplicator.context->Unmap(duplicator.stagingTexture.Get(), 0);
     releaseFrame();
 
-    rfbMarkRectAsModified(context.server, 0, 0, context.width, context.height);
+    if (frameInfo.TotalMetadataBufferSize > 0) {
+        std::vector<std::uint8_t> metadata(frameInfo.TotalMetadataBufferSize);
+        UINT requiredBytes = frameInfo.TotalMetadataBufferSize;
+        hr = duplicator.duplication->GetFrameDirtyRects(
+            static_cast<UINT>(metadata.size()),
+            reinterpret_cast<RECT*>(metadata.data()),
+            &requiredBytes
+        );
+
+        if (SUCCEEDED(hr) && requiredBytes >= sizeof(RECT)) {
+            const auto rectCount = requiredBytes / sizeof(RECT);
+            const auto* rects = reinterpret_cast<const RECT*>(metadata.data());
+            for (UINT index = 0; index < rectCount; ++index) {
+                const RECT& rect = rects[index];
+                rfbMarkRectAsModified(context.server, rect.left, rect.top, rect.right, rect.bottom);
+            }
+            return true;
+        }
+    }
+
+    if (frameInfo.LastPresentTime.QuadPart != 0 || frameInfo.AccumulatedFrames > 0) {
+        rfbMarkRectAsModified(context.server, 0, 0, context.width, context.height);
+    }
     return true;
 }
 
@@ -596,13 +618,11 @@ int runRemoteControlHelper(int port, const std::string& stateFilePath) {
         const bool captured = duplicationReady
             ? captureFrameWithDuplication(context, duplicator)
             : captureFrameWithGdi(context);
-        if (!captured) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            continue;
+        if (!captured && !duplicationReady) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
 
-        rfbProcessEvents(context.server, 10000);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        rfbProcessEvents(context.server, 1000);
     }
 
     removeStateFile(stateFilePath);
