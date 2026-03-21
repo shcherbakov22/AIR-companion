@@ -166,12 +166,14 @@ void pointerEvent(int buttonMask, int x, int y, rfbClientPtr client) {
     auto* context = static_cast<RemoteContext*>(client->screen->screenData);
     const int screenWidth = GetSystemMetrics(SM_CXVIRTUALSCREEN);
     const int screenHeight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    const int clampedX = max(0, min(x, context->width - 1));
+    const int clampedY = max(0, min(y, context->height - 1));
 
     INPUT moveInput{};
     moveInput.type = INPUT_MOUSE;
-    moveInput.mi.dx = MulDiv(x + context->originX, 65535, screenWidth - 1);
-    moveInput.mi.dy = MulDiv(y + context->originY, 65535, screenHeight - 1);
-    moveInput.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    moveInput.mi.dx = MulDiv(clampedX + context->originX, 65535, screenWidth - 1);
+    moveInput.mi.dy = MulDiv(clampedY + context->originY, 65535, screenHeight - 1);
+    moveInput.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
     SendInput(1, &moveInput, sizeof(INPUT));
 
     const struct ButtonInfo {
@@ -302,6 +304,15 @@ int runRemoteControlHelper(int port, const std::string& stateFilePath) {
     context.frameBuffer.assign(static_cast<std::size_t>(context.width) * static_cast<std::size_t>(context.height) * 4, 0);
     context.server->desktopName = const_cast<char*>("AIR Companion");
     context.server->frameBuffer = reinterpret_cast<char*>(context.frameBuffer.data());
+    context.server->serverFormat.bitsPerPixel = 32;
+    context.server->serverFormat.depth = 24;
+    context.server->serverFormat.trueColour = TRUE;
+    context.server->serverFormat.redMax = 255;
+    context.server->serverFormat.greenMax = 255;
+    context.server->serverFormat.blueMax = 255;
+    context.server->serverFormat.redShift = 16;
+    context.server->serverFormat.greenShift = 8;
+    context.server->serverFormat.blueShift = 0;
     context.server->alwaysShared = FALSE;
     context.server->neverShared = TRUE;
     context.server->port = port;
