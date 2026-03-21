@@ -12,6 +12,7 @@
 #include <optional>
 #include <filesystem>
 #include <fstream>
+#include <system_error>
 #include <sstream>
 
 namespace companion::networking {
@@ -279,6 +280,30 @@ HttpResponse HttpClient::postMultipart(const std::string& url,
     (void)options;
     return {200, "{}"};
 #endif
+}
+
+bool HttpClient::downloadToFile(const std::string& url,
+                                const std::map<std::string, std::string>& headers,
+                                const std::string& filePath,
+                                const HttpRequestOptions& options) const {
+    const auto response = get(url, headers, options);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+        return false;
+    }
+
+    std::error_code errorCode;
+    std::filesystem::create_directories(std::filesystem::path(filePath).parent_path(), errorCode);
+    if (errorCode) {
+        return false;
+    }
+
+    std::ofstream output(filePath, std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+        return false;
+    }
+
+    output.write(response.body.data(), static_cast<std::streamsize>(response.body.size()));
+    return output.good();
 }
 
 }  // namespace companion::networking

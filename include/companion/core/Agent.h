@@ -14,6 +14,7 @@
 #include "companion/core/EnforcementCoordinator.h"
 #include "companion/core/PolicySync.h"
 #include "companion/core/UplinkSync.h"
+#include "companion/service/UpdateCoordinator.h"
 
 namespace companion::core {
 
@@ -24,6 +25,7 @@ public:
           CaptureScheduler captureScheduler,
           EnforcementCoordinator enforcementCoordinator,
           UplinkSync uplinkSync,
+          service::UpdateCoordinator updateCoordinator,
           adapters::IAppTrackerAdapter& appTrackerAdapter,
           adapters::IBrowserDomainAdapter& browserDomainAdapter,
           adapters::INetworkConfigurationAdapter& networkConfigurationAdapter,
@@ -45,6 +47,7 @@ private:
     CaptureScheduler m_captureScheduler;
     EnforcementCoordinator m_enforcementCoordinator;
     UplinkSync m_uplinkSync;
+    service::UpdateCoordinator m_updateCoordinator;
     adapters::IAppTrackerAdapter& m_appTrackerAdapter;
     adapters::IBrowserDomainAdapter& m_browserDomainAdapter;
     adapters::INetworkConfigurationAdapter& m_networkConfigurationAdapter;

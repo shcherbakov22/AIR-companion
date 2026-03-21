@@ -9,6 +9,7 @@
 #include "companion/service/CaptureSettingsStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
 #include "companion/service/ServiceHost.h"
+#include "companion/service/UpdateCoordinator.h"
 
 #include <iostream>
 
@@ -40,6 +41,7 @@ int main() {
     companion::core::CommandPoller commandPoller(bootstrapped->apiClient, bootstrapped->config.deviceToken);
     companion::core::CaptureScheduler captureScheduler(captureSettings);
     companion::core::EnforcementCoordinator enforcementCoordinator(enforcementAdapter);
+    companion::service::UpdateCoordinator updateCoordinator(bootstrapped->apiClient, AIR_COMPANION_VERSION);
     companion::core::UplinkSync uplinkSync(
         bootstrapped->apiClient,
         bootstrapped->config.deviceToken,
@@ -52,6 +54,7 @@ int main() {
         std::move(captureScheduler),
         std::move(enforcementCoordinator),
         std::move(uplinkSync),
+        std::move(updateCoordinator),
         appTrackerAdapter,
         browserDomainAdapter,
         networkConfigurationAdapter,

@@ -8,6 +8,7 @@
 #include "companion/models/DeviceCommand.h"
 #include "companion/models/DeviceIdentity.h"
 #include "companion/models/DevicePolicy.h"
+#include "companion/models/UpdateManifest.h"
 #include "companion/networking/HttpClient.h"
 
 namespace companion::networking {
@@ -45,6 +46,8 @@ public:
                              const std::string& filePath,
                              const models::ActivitySnapshot& snapshot,
                              const std::string& contentType) const;
+    std::optional<models::UpdateManifest> fetchUpdateManifest() const;
+    bool downloadFile(const std::string& url, const std::string& filePath) const;
     const std::string& baseUrl() const;
 
 private:

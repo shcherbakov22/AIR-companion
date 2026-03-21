@@ -70,9 +70,10 @@ void appendDebugLog(const std::string& line) {
 
 Agent::Agent(PolicySync policySync,
              CommandPoller commandPoller,
-          CaptureScheduler captureScheduler,
-          EnforcementCoordinator enforcementCoordinator,
-          UplinkSync uplinkSync,
+             CaptureScheduler captureScheduler,
+             EnforcementCoordinator enforcementCoordinator,
+             UplinkSync uplinkSync,
+             service::UpdateCoordinator updateCoordinator,
           adapters::IAppTrackerAdapter& appTrackerAdapter,
           adapters::IBrowserDomainAdapter& browserDomainAdapter,
           adapters::INetworkConfigurationAdapter& networkConfigurationAdapter,
@@ -84,6 +85,7 @@ Agent::Agent(PolicySync policySync,
       m_captureScheduler(std::move(captureScheduler)),
       m_enforcementCoordinator(std::move(enforcementCoordinator)),
       m_uplinkSync(std::move(uplinkSync)),
+      m_updateCoordinator(std::move(updateCoordinator)),
       m_appTrackerAdapter(appTrackerAdapter),
       m_browserDomainAdapter(browserDomainAdapter),
       m_networkConfigurationAdapter(networkConfigurationAdapter),
@@ -181,7 +183,10 @@ void Agent::tick() {
         }
     }
 
-    m_status += " | " + m_uplinkSync.statusSummary();
+    m_updateCoordinator.tick();
+
+    m_status += " | " + m_uplinkSync.statusSummary()
+        + " | " + m_updateCoordinator.statusSummary();
 }
 
 bool Agent::running() const {

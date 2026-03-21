@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(AIRCompanion VERSION 0.1.0 LANGUAGES CXX)
+project(AIRCompanion VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
@@ -51,6 +51,7 @@ set(COMPANION_CORE_SOURCES
     src/service/EnrollmentRequestStore.cpp
     src/service/ServiceHost.cpp
     src/service/TrustedRootInstaller.cpp
+    src/service/UpdateCoordinator.cpp
     src/tray/RemoteControlHelper.cpp
 )
 
@@ -74,6 +75,9 @@ target_link_libraries(air_companion_service PRIVATE air_companion_core)
 
 add_executable(air_companion_tray src/tray/main.cpp)
 target_link_libraries(air_companion_tray PRIVATE air_companion_core)
+
+add_executable(air_companion_updater src/updater/main.cpp)
+target_link_libraries(air_companion_updater PRIVATE air_companion_core)
 
 add_executable(air_companion_tests tests/CompanionTests.cpp)
 target_link_libraries(air_companion_tests PRIVATE air_companion_core)

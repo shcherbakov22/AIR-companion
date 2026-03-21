@@ -1,6 +1,7 @@
 #include "companion/core/CaptureScheduler.h"
 #include "companion/models/DevicePolicy.h"
 #include "companion/networking/CompanionApiParsers.h"
+#include "companion/service/UpdateCoordinator.h"
 #include "companion/service/BootAutoStartRegistrar.h"
 #include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
@@ -331,6 +332,13 @@ void testBootAutoStartRegistrarResolvesServiceBinaryPath() {
     require(taskXml.find("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>") != std::string::npos, "task xml should remove execution time limit");
 }
 
+void testUpdateCoordinatorVersionComparison() {
+    require(companion::service::UpdateCoordinator::isNewerVersion("0.1.1", "0.1.0"), "patch version should be newer");
+    require(companion::service::UpdateCoordinator::isNewerVersion("0.2.0", "0.1.9"), "minor version should be newer");
+    require(!companion::service::UpdateCoordinator::isNewerVersion("0.1.0", "0.1.0"), "same version should not be newer");
+    require(!companion::service::UpdateCoordinator::isNewerVersion("0.1.0", "0.1.1"), "older version should not be newer");
+}
+
 }  // namespace
 
 int main() {
@@ -349,6 +357,7 @@ int main() {
         {"captureSchedulerRespectsMinimumsAndMarks", testCaptureSchedulerRespectsMinimumsAndMarks},
         {"trustedRootInstallerDerivesCertificateUrl", testTrustedRootInstallerDerivesCertificateUrl},
         {"bootAutoStartRegistrarResolvesServiceBinaryPath", testBootAutoStartRegistrarResolvesServiceBinaryPath},
+        {"updateCoordinatorVersionComparison", testUpdateCoordinatorVersionComparison},
     };
 
     int failures = 0;

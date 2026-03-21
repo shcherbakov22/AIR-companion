@@ -3,6 +3,7 @@ out/
 CMakeUserPresets.json
 build/
 captures/
+dist/
 service-out.log
 service-err.log
 

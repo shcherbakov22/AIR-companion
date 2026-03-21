@@ -30,6 +30,10 @@ public:
                                const std::string& filePath,
                                const std::string& contentType,
                                const HttpRequestOptions& options = {}) const;
+    bool downloadToFile(const std::string& url,
+                        const std::map<std::string, std::string>& headers,
+                        const std::string& filePath,
+                        const HttpRequestOptions& options = {}) const;
 };
 
 }  // namespace companion::networking

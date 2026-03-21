@@ -45,6 +45,61 @@ std::string jsonString(const std::string& value) {
     return "\"" + escapeJson(value) + "\"";
 }
 
+std::optional<std::string> extractJsonString(const std::string& body, const std::string& key) {
+    const auto keyPos = body.find("\"" + key + "\"");
+    if (keyPos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const auto colonPos = body.find(':', keyPos);
+    const auto quotePos = body.find('"', colonPos + 1);
+    if (colonPos == std::string::npos || quotePos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    std::string value;
+    for (std::size_t index = quotePos + 1; index < body.size(); ++index) {
+        const auto ch = body[index];
+        if (ch == '\\' && index + 1 < body.size()) {
+            value += body[index + 1];
+            ++index;
+            continue;
+        }
+        if (ch == '"') {
+            return value;
+        }
+        value += ch;
+    }
+
+    return std::nullopt;
+}
+
+bool extractJsonBool(const std::string& body, const std::string& key, bool fallback = false) {
+    const auto keyPos = body.find("\"" + key + "\"");
+    if (keyPos == std::string::npos) {
+        return fallback;
+    }
+
+    const auto colonPos = body.find(':', keyPos);
+    if (colonPos == std::string::npos) {
+        return fallback;
+    }
+
+    const auto valueStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+    if (valueStart == std::string::npos) {
+        return fallback;
+    }
+
+    if (body.compare(valueStart, 4, "true") == 0) {
+        return true;
+    }
+    if (body.compare(valueStart, 5, "false") == 0) {
+        return false;
+    }
+
+    return fallback;
+}
+
 std::string jsonArray(const std::vector<std::string>& values) {
     std::ostringstream out;
     out << "[";
@@ -301,6 +356,35 @@ bool CompanionApiClient::uploadCameraCapture(const std::string& deviceToken,
         contentType
     );
     return response.statusCode >= 200 && response.statusCode < 300;
+}
+
+std::optional<models::UpdateManifest> CompanionApiClient::fetchUpdateManifest() const {
+    const auto response = m_httpClient.get(m_baseUrl + "/api/companion/update-manifest", {
+        {"Accept", "application/json"},
+    });
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+        return std::nullopt;
+    }
+
+    models::UpdateManifest manifest;
+    manifest.available = extractJsonBool(response.body, "available");
+    manifest.version = extractJsonString(response.body, "version").value_or({});
+    manifest.channel = extractJsonString(response.body, "channel").value_or("stable");
+    manifest.mandatory = extractJsonBool(response.body, "mandatory");
+    manifest.downloadUrl = extractJsonString(response.body, "download_url").value_or({});
+    manifest.sha256 = extractJsonString(response.body, "sha256").value_or({});
+
+    if (!manifest.available || manifest.version.empty() || manifest.downloadUrl.empty() || manifest.sha256.empty()) {
+        return std::nullopt;
+    }
+
+    return manifest;
+}
+
+bool CompanionApiClient::downloadFile(const std::string& url, const std::string& filePath) const {
+    return m_httpClient.downloadToFile(url, {
+        {"Accept", "*/*"},
+    }, filePath);
 }
 
 const std::string& CompanionApiClient::baseUrl() const {
