@@ -366,6 +366,29 @@ void pointerEvent(int buttonMask, int x, int y, rfbClientPtr client) {
     moveInput.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
     SendInput(1, &moveInput, sizeof(INPUT));
 
+    const int previousButtonMask = context->buttonMask;
+
+    const auto sendWheel = [](LONG data, DWORD flags) {
+        INPUT wheelInput{};
+        wheelInput.type = INPUT_MOUSE;
+        wheelInput.mi.mouseData = static_cast<DWORD>(data);
+        wheelInput.mi.dwFlags = flags;
+        SendInput(1, &wheelInput, sizeof(INPUT));
+    };
+
+    if ((buttonMask & 8) != 0 && (previousButtonMask & 8) == 0) {
+        sendWheel(WHEEL_DELTA, MOUSEEVENTF_WHEEL);
+    }
+    if ((buttonMask & 16) != 0 && (previousButtonMask & 16) == 0) {
+        sendWheel(-WHEEL_DELTA, MOUSEEVENTF_WHEEL);
+    }
+    if ((buttonMask & 32) != 0 && (previousButtonMask & 32) == 0) {
+        sendWheel(-WHEEL_DELTA, MOUSEEVENTF_HWHEEL);
+    }
+    if ((buttonMask & 64) != 0 && (previousButtonMask & 64) == 0) {
+        sendWheel(WHEEL_DELTA, MOUSEEVENTF_HWHEEL);
+    }
+
     const struct ButtonInfo {
         int mask;
         DWORD downFlag;
