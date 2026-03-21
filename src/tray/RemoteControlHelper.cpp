@@ -32,6 +32,9 @@ struct RemoteContext {
     int originX{0};
     int originY{0};
     int buttonMask{0};
+    bool shiftDown{false};
+    bool controlDown{false};
+    bool altDown{false};
 };
 
 std::wstring utf8ToWide(const std::string& value) {
@@ -74,13 +77,49 @@ BOOL WINAPI consoleHandler(DWORD signal) {
     }
 }
 
-WORD virtualKeyForKeysym(rfbKeySym keySym, bool& useUnicode, std::wstring& unicodeText) {
+std::optional<WORD> modifierVirtualKey(rfbKeySym keySym) {
+    switch (keySym) {
+        case 0xFFE1:
+        case 0xFFE2:
+            return VK_SHIFT;
+        case 0xFFE3:
+        case 0xFFE4:
+            return VK_CONTROL;
+        case 0xFFE9:
+        case 0xFFEA:
+            return VK_MENU;
+        default:
+            return std::nullopt;
+    }
+}
+
+void sendVirtualKey(WORD virtualKey, bool down) {
+    INPUT input{};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = virtualKey;
+    input.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+void updateModifierState(RemoteContext& context, WORD virtualKey, bool down) {
+    if (virtualKey == VK_SHIFT) {
+        context.shiftDown = down;
+    } else if (virtualKey == VK_CONTROL) {
+        context.controlDown = down;
+    } else if (virtualKey == VK_MENU) {
+        context.altDown = down;
+    }
+}
+
+WORD virtualKeyForKeysym(rfbKeySym keySym, bool& useUnicode, std::wstring& unicodeText, BYTE& requiredModifiers) {
     useUnicode = false;
     unicodeText.clear();
+    requiredModifiers = 0;
 
     if (keySym >= 32 && keySym <= 126) {
         SHORT translated = VkKeyScanW(static_cast<WCHAR>(keySym));
         if (translated != -1) {
+            requiredModifiers = HIBYTE(translated);
             return LOBYTE(translated);
         }
 
@@ -142,11 +181,18 @@ void sendUnicodeInput(bool down, const std::wstring& text) {
 }
 
 void keyboardEvent(rfbBool down, rfbKeySym keySym, rfbClientPtr client) {
-    (void) client;
+    auto* context = static_cast<RemoteContext*>(client->screen->screenData);
+
+    if (const auto modifierKey = modifierVirtualKey(keySym)) {
+        updateModifierState(*context, *modifierKey, down != 0);
+        sendVirtualKey(*modifierKey, down != 0);
+        return;
+    }
 
     bool useUnicode = false;
     std::wstring unicodeText;
-    const WORD virtualKey = virtualKeyForKeysym(keySym, useUnicode, unicodeText);
+    BYTE requiredModifiers = 0;
+    const WORD virtualKey = virtualKeyForKeysym(keySym, useUnicode, unicodeText, requiredModifiers);
     if (useUnicode) {
         sendUnicodeInput(down != 0, unicodeText);
         return;
@@ -155,11 +201,39 @@ void keyboardEvent(rfbBool down, rfbKeySym keySym, rfbClientPtr client) {
         return;
     }
 
-    INPUT input{};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = virtualKey;
-    input.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
-    SendInput(1, &input, sizeof(INPUT));
+    const bool needsShift = (requiredModifiers & 1) != 0;
+    const bool needsControl = (requiredModifiers & 2) != 0;
+    const bool needsAlt = (requiredModifiers & 4) != 0;
+    const bool tempShift = needsShift && !context->shiftDown;
+    const bool tempControl = needsControl && !context->controlDown;
+    const bool tempAlt = needsAlt && !context->altDown;
+
+    if (down) {
+        if (tempShift) {
+            sendVirtualKey(VK_SHIFT, true);
+        }
+        if (tempControl) {
+            sendVirtualKey(VK_CONTROL, true);
+        }
+        if (tempAlt) {
+            sendVirtualKey(VK_MENU, true);
+        }
+
+        sendVirtualKey(virtualKey, true);
+        return;
+    }
+
+    sendVirtualKey(virtualKey, false);
+
+    if (tempAlt) {
+        sendVirtualKey(VK_MENU, false);
+    }
+    if (tempControl) {
+        sendVirtualKey(VK_CONTROL, false);
+    }
+    if (tempShift) {
+        sendVirtualKey(VK_SHIFT, false);
+    }
 }
 
 void pointerEvent(int buttonMask, int x, int y, rfbClientPtr client) {
