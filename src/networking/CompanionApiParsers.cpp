@@ -152,11 +152,11 @@ models::DeviceCommandType parseCommandType(const std::string& type) {
     if (type == "verify_remote_control") {
         return models::DeviceCommandType::VerifyRemoteControl;
     }
-    if (type == "enable_remote_access") {
-        return models::DeviceCommandType::EnableRemoteAccess;
+    if (type == "start_remote_control") {
+        return models::DeviceCommandType::StartRemoteControl;
     }
-    if (type == "refresh_remote_credentials") {
-        return models::DeviceCommandType::RefreshRemoteCredentials;
+    if (type == "stop_remote_control") {
+        return models::DeviceCommandType::StopRemoteControl;
     }
     return models::DeviceCommandType::Unknown;
 }

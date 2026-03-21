@@ -145,12 +145,14 @@ void Agent::tick() {
                 output = success ? "remote control ready" : m_remoteAccessAdapter.currentState().failureReason;
                 break;
             }
-            case models::DeviceCommandType::EnableRemoteAccess:
-            case models::DeviceCommandType::RefreshRemoteCredentials: {
-                const auto username = jsonStringValue(command.payloadJson, "username").value_or("");
-                const auto password = jsonStringValue(command.payloadJson, "password").value_or("");
-                success = !username.empty() && !password.empty() && m_remoteAccessAdapter.ensureEnabled(username, password);
-                output = success ? "remote access configured" : m_remoteAccessAdapter.currentState().failureReason;
+            case models::DeviceCommandType::StartRemoteControl: {
+                success = m_remoteAccessAdapter.startRemoteControl();
+                output = success ? "remote control started" : m_remoteAccessAdapter.currentState().failureReason;
+                break;
+            }
+            case models::DeviceCommandType::StopRemoteControl: {
+                success = m_remoteAccessAdapter.stopRemoteControl();
+                output = success ? "remote control stopped" : m_remoteAccessAdapter.currentState().failureReason;
                 break;
             }
             default:

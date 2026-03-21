@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
@@ -59,17 +60,22 @@ public:
 class WindowsRemoteAccessAdapter final : public IRemoteAccessAdapter {
 public:
     models::RemoteAccessState currentState() const override;
-    bool ensureEnabled(const std::string& username, const std::string& password) override;
+    bool startRemoteControl() override;
+    bool stopRemoteControl() override;
     bool verifyReadiness() override;
 
 private:
-    bool ensureServiceRunning(const std::string& serviceName) const;
+    bool helperIsListening() const;
+    bool activeConsoleSessionAvailable() const;
+    bool launchHelper();
+    std::wstring helperBinaryPath() const;
+    std::wstring helperStatePath() const;
+    std::optional<std::uint32_t> helperProcessId() const;
+    static bool processExists(std::uint32_t processId);
     bool isTcpPortListening(unsigned short port) const;
+    bool waitForHelperReady(int timeoutMilliseconds);
     static bool runCommand(const std::string& command);
-    static bool localUserExists(const std::string& username);
-    static bool isRdpEnabledInRegistry();
     static std::string quoteForCommand(const std::string& value);
-    static std::string quoteForPowerShell(const std::string& value);
 
     models::RemoteAccessState m_state{};
 };

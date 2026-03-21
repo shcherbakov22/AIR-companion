@@ -11,7 +11,8 @@ public:
     virtual ~IRemoteAccessAdapter() = default;
 
     virtual models::RemoteAccessState currentState() const = 0;
-    virtual bool ensureEnabled(const std::string& username, const std::string& password) = 0;
+    virtual bool startRemoteControl() = 0;
+    virtual bool stopRemoteControl() = 0;
     virtual bool verifyReadiness() = 0;
 };
 

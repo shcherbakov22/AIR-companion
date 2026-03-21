@@ -11,8 +11,8 @@ enum class DeviceCommandType {
     LockInternet,
     UnlockInternet,
     VerifyRemoteControl,
-    EnableRemoteAccess,
-    RefreshRemoteCredentials,
+    StartRemoteControl,
+    StopRemoteControl,
     Unknown
 };
 

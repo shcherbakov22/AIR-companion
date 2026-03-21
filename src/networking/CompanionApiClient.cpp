@@ -202,6 +202,8 @@ bool CompanionApiClient::sendHeartbeat(const std::string& deviceToken,
          << "\"gateway_ipv4\":" << jsonString(snapshot.networkIdentity.gatewayIpv4) << ","
          << "\"network_adapter_name\":" << jsonString(snapshot.networkIdentity.adapterName) << ","
          << "\"remote_control_ready\":" << (snapshot.remoteAccessState.ready ? "true" : "false") << ","
+         << "\"remote_control_active\":" << (snapshot.remoteAccessState.active ? "true" : "false") << ","
+         << "\"remote_control_port\":" << snapshot.remoteAccessState.port << ","
          << "\"remote_control_failure_reason\":" << jsonString(snapshot.remoteAccessState.failureReason) << ","
          << "\"meta\":{"
          << "\"focused_app\":" << jsonString(snapshot.focusedApp) << ","
@@ -209,8 +211,7 @@ bool CompanionApiClient::sendHeartbeat(const std::string& deviceToken,
          << "\"active_browser_domain\":" << jsonString(snapshot.activeBrowserDomain) << ","
          << "\"open_apps\":" << jsonArray(snapshot.openApps) << ","
          << "\"dns_ipv4\":" << jsonString(snapshot.networkIdentity.dnsIpv4) << ","
-         << "\"air_gateway_state\":" << jsonString(networkState) << ","
-         << "\"remote_control_username\":" << jsonString(snapshot.remoteAccessState.username)
+         << "\"air_gateway_state\":" << jsonString(networkState)
          << "}}";
 
     const auto response = m_httpClient.post(

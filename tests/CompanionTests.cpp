@@ -167,6 +167,32 @@ void testParseCommandResponseSupportsNumericIds() {
     requireEqual(commands.front().payloadJson, std::string("{\"source\": \"manual_debug\"}"), "payload object parse");
 }
 
+void testParseRemoteControlCommandTypes() {
+    const auto startCommands = companion::networking::parseCommandResponse(R"({
+        "accepted": true,
+        "command": {
+            "id": 11,
+            "command_type": "start_remote_control",
+            "status": "pending",
+            "payload": {}
+        }
+    })");
+    requireEqual(startCommands.size(), static_cast<std::size_t>(1), "start remote command count");
+    require(startCommands.front().type == companion::models::DeviceCommandType::StartRemoteControl, "start remote command type");
+
+    const auto stopCommands = companion::networking::parseCommandResponse(R"({
+        "accepted": true,
+        "command": {
+            "id": 12,
+            "command_type": "stop_remote_control",
+            "status": "pending",
+            "payload": {}
+        }
+    })");
+    requireEqual(stopCommands.size(), static_cast<std::size_t>(1), "stop remote command count");
+    require(stopCommands.front().type == companion::models::DeviceCommandType::StopRemoteControl, "stop remote command type");
+}
+
 void testCompanionConfigStoreRoundTrip() {
     ScopedTempDir tempDir;
     ScopedEnvVar appData("APPDATA", tempDir.path().string());
@@ -317,6 +343,7 @@ int main() {
         {"parseEnrollmentResponse", testParseEnrollmentResponse},
         {"parsePolicyResponse", testParsePolicyResponse},
         {"parseCommandResponseSupportsNumericIds", testParseCommandResponseSupportsNumericIds},
+        {"parseRemoteControlCommandTypes", testParseRemoteControlCommandTypes},
         {"companionConfigStoreRoundTrip", testCompanionConfigStoreRoundTrip},
         {"enrollmentRequestStoreRoundTrip", testEnrollmentRequestStoreRoundTrip},
         {"captureSchedulerRespectsMinimumsAndMarks", testCaptureSchedulerRespectsMinimumsAndMarks},

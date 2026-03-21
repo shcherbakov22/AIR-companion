@@ -10,6 +10,7 @@
 #include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
 #include "companion/tray/EnrollmentWindow.h"
+#include "companion/tray/RemoteControlHelper.h"
 #include "companion/tray/TrayApplication.h"
 
 #include <iostream>
@@ -72,6 +73,16 @@ int main(int argc, char* argv[]) {
     if (const auto* outputDirectory = argumentValue(argc, argv, "--capture-screen-once"); outputDirectory != nullptr) {
         companion::adapters::windows::WindowsScreenCaptureAdapter screenCaptureAdapter;
         return screenCaptureAdapter.captureToFile(outputDirectory).has_value() ? 0 : 1;
+    }
+
+    if (hasArgument(argc, argv, "--remote-helper")) {
+        const auto* portValue = argumentValue(argc, argv, "--port");
+        const auto* stateFilePath = argumentValue(argc, argv, "--state-file");
+        if (portValue == nullptr || stateFilePath == nullptr) {
+            return 1;
+        }
+
+        return companion::tray::runRemoteControlHelper(std::stoi(portValue), stateFilePath);
     }
 
     companion::service::Bootstrap bootstrap;

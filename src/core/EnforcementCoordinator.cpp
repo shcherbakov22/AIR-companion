@@ -18,8 +18,8 @@ void EnforcementCoordinator::applyCommand(const models::DeviceCommand& command) 
         case models::DeviceCommandType::RequestScreenshot:
         case models::DeviceCommandType::RequestCameraCapture:
         case models::DeviceCommandType::VerifyRemoteControl:
-        case models::DeviceCommandType::EnableRemoteAccess:
-        case models::DeviceCommandType::RefreshRemoteCredentials:
+        case models::DeviceCommandType::StartRemoteControl:
+        case models::DeviceCommandType::StopRemoteControl:
         case models::DeviceCommandType::Unknown:
         default:
             break;
