@@ -5,13 +5,17 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <d3d11.h>
+#include <dxgi1_2.h>
 #include <rfb/rfb.h>
+#include <wrl/client.h>
 #endif
 
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <thread>
@@ -23,14 +27,124 @@ namespace companion::tray {
 namespace {
 
 std::atomic_bool g_running{true};
+using Microsoft::WRL::ComPtr;
+
+struct DesktopDuplicator {
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    ComPtr<IDXGIOutputDuplication> duplication;
+    ComPtr<ID3D11Texture2D> stagingTexture;
+    DXGI_OUTPUT_DESC outputDesc{};
+    int width{0};
+    int height{0};
+
+    bool initialize() {
+        UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+        D3D_FEATURE_LEVEL featureLevel{};
+        static const D3D_FEATURE_LEVEL featureLevels[] = {
+            D3D_FEATURE_LEVEL_11_1,
+            D3D_FEATURE_LEVEL_11_0,
+            D3D_FEATURE_LEVEL_10_1,
+            D3D_FEATURE_LEVEL_10_0,
+        };
+
+        HRESULT hr = D3D11CreateDevice(
+            nullptr,
+            D3D_DRIVER_TYPE_HARDWARE,
+            nullptr,
+            creationFlags,
+            featureLevels,
+            ARRAYSIZE(featureLevels),
+            D3D11_SDK_VERSION,
+            &device,
+            &featureLevel,
+            &context
+        );
+        if (FAILED(hr)) {
+            hr = D3D11CreateDevice(
+                nullptr,
+                D3D_DRIVER_TYPE_WARP,
+                nullptr,
+                creationFlags,
+                featureLevels,
+                ARRAYSIZE(featureLevels),
+                D3D11_SDK_VERSION,
+                &device,
+                &featureLevel,
+                &context
+            );
+            if (FAILED(hr)) {
+                return false;
+            }
+        }
+
+        ComPtr<IDXGIDevice> dxgiDevice;
+        hr = device.As(&dxgiDevice);
+        if (FAILED(hr)) {
+            return false;
+        }
+
+        ComPtr<IDXGIAdapter> adapter;
+        hr = dxgiDevice->GetAdapter(&adapter);
+        if (FAILED(hr)) {
+            return false;
+        }
+
+        ComPtr<IDXGIOutput> output;
+        hr = adapter->EnumOutputs(0, &output);
+        if (FAILED(hr)) {
+            return false;
+        }
+
+        output->GetDesc(&outputDesc);
+        width = outputDesc.DesktopCoordinates.right - outputDesc.DesktopCoordinates.left;
+        height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
+        if (width <= 0 || height <= 0) {
+            return false;
+        }
+
+        ComPtr<IDXGIOutput1> output1;
+        hr = output.As(&output1);
+        if (FAILED(hr)) {
+            return false;
+        }
+
+        hr = output1->DuplicateOutput(device.Get(), &duplication);
+        if (FAILED(hr)) {
+            return false;
+        }
+
+        D3D11_TEXTURE2D_DESC textureDesc{};
+        textureDesc.Width = static_cast<UINT>(width);
+        textureDesc.Height = static_cast<UINT>(height);
+        textureDesc.MipLevels = 1;
+        textureDesc.ArraySize = 1;
+        textureDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.Usage = D3D11_USAGE_STAGING;
+        textureDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+        hr = device->CreateTexture2D(&textureDesc, nullptr, &stagingTexture);
+        return SUCCEEDED(hr);
+    }
+
+    bool reinitialize() {
+        duplication.Reset();
+        stagingTexture.Reset();
+        context.Reset();
+        device.Reset();
+        width = 0;
+        height = 0;
+        ZeroMemory(&outputDesc, sizeof(outputDesc));
+        return initialize();
+    }
+};
 
 struct RemoteContext {
     rfbScreenInfoPtr server{nullptr};
     std::vector<std::uint8_t> frameBuffer;
     int width{0};
     int height{0};
-    int sourceWidth{0};
-    int sourceHeight{0};
     int originX{0};
     int originY{0};
     int buttonMask{0};
@@ -38,9 +152,6 @@ struct RemoteContext {
     bool controlDown{false};
     bool altDown{false};
 };
-
-constexpr int kMaxRemoteWidth = 1280;
-constexpr int kMaxRemoteHeight = 720;
 
 std::wstring utf8ToWide(const std::string& value) {
     if (value.empty()) {
@@ -66,23 +177,6 @@ void writeStateFile(const std::string& path, int port) {
 void removeStateFile(const std::string& path) {
     std::error_code errorCode;
     std::filesystem::remove(path, errorCode);
-}
-
-void updateTargetDimensions(RemoteContext& context) {
-    context.sourceWidth = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    context.sourceHeight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-    if (context.sourceWidth <= 0 || context.sourceHeight <= 0) {
-        context.width = 0;
-        context.height = 0;
-        return;
-    }
-
-    const double widthScale = static_cast<double>(kMaxRemoteWidth) / static_cast<double>(context.sourceWidth);
-    const double heightScale = static_cast<double>(kMaxRemoteHeight) / static_cast<double>(context.sourceHeight);
-    const double scale = min(1.0, min(widthScale, heightScale));
-
-    context.width = max(1, static_cast<int>(context.sourceWidth * scale));
-    context.height = max(1, static_cast<int>(context.sourceHeight * scale));
 }
 
 BOOL WINAPI consoleHandler(DWORD signal) {
@@ -264,17 +358,11 @@ void pointerEvent(int buttonMask, int x, int y, rfbClientPtr client) {
     const int screenHeight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
     const int clampedX = max(0, min(x, context->width - 1));
     const int clampedY = max(0, min(y, context->height - 1));
-    const int mappedX = context->width > 1
-        ? MulDiv(clampedX, context->sourceWidth - 1, context->width - 1)
-        : 0;
-    const int mappedY = context->height > 1
-        ? MulDiv(clampedY, context->sourceHeight - 1, context->height - 1)
-        : 0;
 
     INPUT moveInput{};
     moveInput.type = INPUT_MOUSE;
-    moveInput.mi.dx = MulDiv(mappedX, 65535, screenWidth - 1);
-    moveInput.mi.dy = MulDiv(mappedY, 65535, screenHeight - 1);
+    moveInput.mi.dx = MulDiv(clampedX, 65535, screenWidth - 1);
+    moveInput.mi.dy = MulDiv(clampedY, 65535, screenHeight - 1);
     moveInput.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
     SendInput(1, &moveInput, sizeof(INPUT));
 
@@ -304,11 +392,12 @@ void pointerEvent(int buttonMask, int x, int y, rfbClientPtr client) {
     context->buttonMask = buttonMask;
 }
 
-bool captureFrame(RemoteContext& context) {
+bool captureFrameWithGdi(RemoteContext& context) {
     context.originX = GetSystemMetrics(SM_XVIRTUALSCREEN);
     context.originY = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    updateTargetDimensions(context);
-    if (context.width <= 0 || context.height <= 0 || context.sourceWidth <= 0 || context.sourceHeight <= 0) {
+    context.width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    context.height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (context.width <= 0 || context.height <= 0) {
         return false;
     }
 
@@ -324,34 +413,25 @@ bool captureFrame(RemoteContext& context) {
     }
 
     HDC memoryDc = CreateCompatibleDC(screenDc);
-    HDC scaledDc = CreateCompatibleDC(screenDc);
-    HBITMAP sourceBitmap = CreateCompatibleBitmap(screenDc, context.sourceWidth, context.sourceHeight);
-    HBITMAP scaledBitmap = CreateCompatibleBitmap(screenDc, context.width, context.height);
-    if (memoryDc == nullptr || scaledDc == nullptr || sourceBitmap == nullptr || scaledBitmap == nullptr) {
-        if (sourceBitmap != nullptr) {
-            DeleteObject(sourceBitmap);
-        }
-        if (scaledBitmap != nullptr) {
-            DeleteObject(scaledBitmap);
+    HBITMAP bitmap = CreateCompatibleBitmap(screenDc, context.width, context.height);
+    if (memoryDc == nullptr || bitmap == nullptr) {
+        if (bitmap != nullptr) {
+            DeleteObject(bitmap);
         }
         if (memoryDc != nullptr) {
             DeleteDC(memoryDc);
-        }
-        if (scaledDc != nullptr) {
-            DeleteDC(scaledDc);
         }
         ReleaseDC(nullptr, screenDc);
         return false;
     }
 
-    HGDIOBJ previousSourceObject = SelectObject(memoryDc, sourceBitmap);
-    HGDIOBJ previousScaledObject = SelectObject(scaledDc, scaledBitmap);
+    HGDIOBJ previousObject = SelectObject(memoryDc, bitmap);
     const BOOL copied = BitBlt(
         memoryDc,
         0,
         0,
-        context.sourceWidth,
-        context.sourceHeight,
+        context.width,
+        context.height,
         screenDc,
         context.originX,
         context.originY,
@@ -366,24 +446,10 @@ bool captureFrame(RemoteContext& context) {
     bitmapInfo.bmiHeader.biBitCount = 32;
     bitmapInfo.bmiHeader.biCompression = BI_RGB;
 
-    const BOOL scaled = copied && StretchBlt(
-        scaledDc,
-        0,
-        0,
-        context.width,
-        context.height,
-        memoryDc,
-        0,
-        0,
-        context.sourceWidth,
-        context.sourceHeight,
-        SRCCOPY
-    );
-
-    if (scaled) {
+    if (copied) {
         GetDIBits(
-            scaledDc,
-            scaledBitmap,
+            memoryDc,
+            bitmap,
             0,
             static_cast<UINT>(context.height),
             context.frameBuffer.data(),
@@ -392,17 +458,77 @@ bool captureFrame(RemoteContext& context) {
         );
     }
 
-    SelectObject(memoryDc, previousSourceObject);
-    SelectObject(scaledDc, previousScaledObject);
-    DeleteObject(sourceBitmap);
-    DeleteObject(scaledBitmap);
+    SelectObject(memoryDc, previousObject);
+    DeleteObject(bitmap);
     DeleteDC(memoryDc);
-    DeleteDC(scaledDc);
     ReleaseDC(nullptr, screenDc);
 
-    if (!scaled) {
+    if (!copied) {
         return false;
     }
+
+    rfbMarkRectAsModified(context.server, 0, 0, context.width, context.height);
+    return true;
+}
+
+bool captureFrameWithDuplication(RemoteContext& context, DesktopDuplicator& duplicator) {
+    DXGI_OUTDUPL_FRAME_INFO frameInfo{};
+    ComPtr<IDXGIResource> desktopResource;
+    HRESULT hr = duplicator.duplication->AcquireNextFrame(16, &frameInfo, &desktopResource);
+    if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+        return true;
+    }
+    if (hr == DXGI_ERROR_ACCESS_LOST) {
+        return duplicator.reinitialize();
+    }
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    auto releaseFrame = [&]() {
+        duplicator.duplication->ReleaseFrame();
+    };
+
+    ComPtr<ID3D11Texture2D> frameTexture;
+    hr = desktopResource.As(&frameTexture);
+    if (FAILED(hr)) {
+        releaseFrame();
+        return false;
+    }
+
+    D3D11_TEXTURE2D_DESC frameDesc{};
+    frameTexture->GetDesc(&frameDesc);
+    context.width = static_cast<int>(frameDesc.Width);
+    context.height = static_cast<int>(frameDesc.Height);
+    context.originX = duplicator.outputDesc.DesktopCoordinates.left;
+    context.originY = duplicator.outputDesc.DesktopCoordinates.top;
+
+    const std::size_t bytes = static_cast<std::size_t>(context.width) * static_cast<std::size_t>(context.height) * 4;
+    if (context.frameBuffer.size() != bytes) {
+        context.frameBuffer.assign(bytes, 0);
+        context.server->frameBuffer = reinterpret_cast<char*>(context.frameBuffer.data());
+    }
+
+    duplicator.context->CopyResource(duplicator.stagingTexture.Get(), frameTexture.Get());
+
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    hr = duplicator.context->Map(duplicator.stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(hr)) {
+        releaseFrame();
+        return false;
+    }
+
+    const auto rowBytes = static_cast<std::size_t>(context.width) * 4;
+    for (int row = 0; row < context.height; ++row) {
+        std::memcpy(
+            context.frameBuffer.data() + static_cast<std::size_t>(row) * rowBytes,
+            static_cast<std::uint8_t*>(mapped.pData) + static_cast<std::size_t>(row) * mapped.RowPitch,
+            rowBytes
+        );
+    }
+
+    duplicator.context->Unmap(duplicator.stagingTexture.Get(), 0);
+    releaseFrame();
 
     rfbMarkRectAsModified(context.server, 0, 0, context.width, context.height);
     return true;
@@ -415,7 +541,19 @@ int runRemoteControlHelper(int port, const std::string& stateFilePath) {
 #ifdef _WIN32
     SetConsoleCtrlHandler(consoleHandler, TRUE);
     RemoteContext context;
-    updateTargetDimensions(context);
+    DesktopDuplicator duplicator;
+    const bool duplicationReady = duplicator.initialize();
+    if (duplicationReady) {
+        context.width = duplicator.width;
+        context.height = duplicator.height;
+        context.originX = duplicator.outputDesc.DesktopCoordinates.left;
+        context.originY = duplicator.outputDesc.DesktopCoordinates.top;
+    } else {
+        context.width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        context.height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        context.originX = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        context.originY = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    }
     if (context.width <= 0 || context.height <= 0) {
         return 1;
     }
@@ -446,7 +584,7 @@ int runRemoteControlHelper(int port, const std::string& stateFilePath) {
     context.server->ptrAddEvent = pointerEvent;
     context.server->screenData = &context;
 
-    if (!captureFrame(context)) {
+    if (!(duplicationReady ? captureFrameWithDuplication(context, duplicator) : captureFrameWithGdi(context))) {
         rfbScreenCleanup(context.server);
         return 1;
     }
@@ -455,7 +593,10 @@ int runRemoteControlHelper(int port, const std::string& stateFilePath) {
     writeStateFile(stateFilePath, port);
 
     while (g_running) {
-        if (!captureFrame(context)) {
+        const bool captured = duplicationReady
+            ? captureFrameWithDuplication(context, duplicator)
+            : captureFrameWithGdi(context);
+        if (!captured) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             continue;
         }
