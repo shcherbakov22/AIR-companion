@@ -30,6 +30,7 @@ int main() {
     companion::adapters::windows::WindowsCameraCaptureAdapter cameraCaptureAdapter;
     companion::adapters::windows::WindowsEnforcementAdapter enforcementAdapter;
     companion::adapters::windows::WindowsNetworkConfigurationAdapter networkConfigurationAdapter;
+    companion::adapters::windows::WindowsRemoteAccessAdapter remoteAccessAdapter;
     companion::service::CaptureSettingsStore captureSettingsStore;
     const auto captureSettings = captureSettingsStore.loadOrCreate();
 
@@ -52,6 +53,7 @@ int main() {
         appTrackerAdapter,
         browserDomainAdapter,
         networkConfigurationAdapter,
+        remoteAccessAdapter,
         screenCaptureAdapter,
         cameraCaptureAdapter
     );

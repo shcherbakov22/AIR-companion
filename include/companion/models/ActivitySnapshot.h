@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "companion/models/NetworkIdentity.h"
+#include "companion/models/RemoteAccessState.h"
 
 namespace companion::models {
 
@@ -13,6 +14,7 @@ struct ActivitySnapshot {
     std::string activeBrowserDomain;
     std::vector<std::string> openApps;
     NetworkIdentity networkIdentity;
+    RemoteAccessState remoteAccessState;
 };
 
 }  // namespace companion::models

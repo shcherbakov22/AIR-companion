@@ -4,11 +4,45 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <utility>
 
 namespace companion::core {
 
 namespace {
+
+std::optional<std::string> jsonStringValue(const std::string& body, const std::string& key) {
+    const auto keyPos = body.find("\"" + key + "\"");
+    if (keyPos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const auto colonPos = body.find(':', keyPos);
+    if (colonPos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const auto valueStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+    if (valueStart == std::string::npos || body[valueStart] != '"') {
+        return std::nullopt;
+    }
+
+    std::string value;
+    for (std::size_t index = valueStart + 1; index < body.size(); ++index) {
+        const char ch = body[index];
+        if (ch == '\\' && index + 1 < body.size()) {
+            value += body[index + 1];
+            ++index;
+            continue;
+        }
+        if (ch == '"') {
+            return value;
+        }
+        value += ch;
+    }
+
+    return std::nullopt;
+}
 
 void appendDebugLog(const std::string& line) {
 #ifdef _WIN32
@@ -36,14 +70,15 @@ void appendDebugLog(const std::string& line) {
 
 Agent::Agent(PolicySync policySync,
              CommandPoller commandPoller,
-             CaptureScheduler captureScheduler,
-             EnforcementCoordinator enforcementCoordinator,
-             UplinkSync uplinkSync,
-             adapters::IAppTrackerAdapter& appTrackerAdapter,
-             adapters::IBrowserDomainAdapter& browserDomainAdapter,
-             adapters::INetworkConfigurationAdapter& networkConfigurationAdapter,
-             adapters::IScreenCaptureAdapter& screenCaptureAdapter,
-             adapters::ICameraCaptureAdapter& cameraCaptureAdapter)
+          CaptureScheduler captureScheduler,
+          EnforcementCoordinator enforcementCoordinator,
+          UplinkSync uplinkSync,
+          adapters::IAppTrackerAdapter& appTrackerAdapter,
+          adapters::IBrowserDomainAdapter& browserDomainAdapter,
+          adapters::INetworkConfigurationAdapter& networkConfigurationAdapter,
+          adapters::IRemoteAccessAdapter& remoteAccessAdapter,
+          adapters::IScreenCaptureAdapter& screenCaptureAdapter,
+          adapters::ICameraCaptureAdapter& cameraCaptureAdapter)
     : m_policySync(std::move(policySync)),
       m_commandPoller(std::move(commandPoller)),
       m_captureScheduler(std::move(captureScheduler)),
@@ -52,6 +87,7 @@ Agent::Agent(PolicySync policySync,
       m_appTrackerAdapter(appTrackerAdapter),
       m_browserDomainAdapter(browserDomainAdapter),
       m_networkConfigurationAdapter(networkConfigurationAdapter),
+      m_remoteAccessAdapter(remoteAccessAdapter),
       m_screenCaptureAdapter(screenCaptureAdapter),
       m_cameraCaptureAdapter(cameraCaptureAdapter) {}
 
@@ -104,6 +140,19 @@ void Agent::tick() {
                 appendDebugLog("agent camera command success=" + std::string(success ? "true" : "false") + " path=" + (path.has_value() ? *path : std::string{}));
                 break;
             }
+            case models::DeviceCommandType::VerifyRemoteControl: {
+                success = m_remoteAccessAdapter.verifyReadiness();
+                output = success ? "remote control ready" : m_remoteAccessAdapter.currentState().failureReason;
+                break;
+            }
+            case models::DeviceCommandType::EnableRemoteAccess:
+            case models::DeviceCommandType::RefreshRemoteCredentials: {
+                const auto username = jsonStringValue(command.payloadJson, "username").value_or("");
+                const auto password = jsonStringValue(command.payloadJson, "password").value_or("");
+                success = !username.empty() && !password.empty() && m_remoteAccessAdapter.ensureEnabled(username, password);
+                output = success ? "remote access configured" : m_remoteAccessAdapter.currentState().failureReason;
+                break;
+            }
             default:
                 m_enforcementCoordinator.applyCommand(command);
                 appendDebugLog("agent non-capture command processed");
@@ -147,6 +196,8 @@ models::ActivitySnapshot Agent::currentSnapshot() const {
         snapshot.activeBrowserDomain = *domain;
     }
     snapshot.networkIdentity = m_networkConfigurationAdapter.currentIdentity();
+    (void) m_remoteAccessAdapter.verifyReadiness();
+    snapshot.remoteAccessState = m_remoteAccessAdapter.currentState();
 
     return snapshot;
 }

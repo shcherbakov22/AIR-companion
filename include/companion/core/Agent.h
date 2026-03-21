@@ -7,6 +7,7 @@
 #include "companion/adapters/ICameraCaptureAdapter.h"
 #include "companion/adapters/IAppTrackerAdapter.h"
 #include "companion/adapters/INetworkConfigurationAdapter.h"
+#include "companion/adapters/IRemoteAccessAdapter.h"
 #include "companion/adapters/IScreenCaptureAdapter.h"
 #include "companion/core/CaptureScheduler.h"
 #include "companion/core/CommandPoller.h"
@@ -26,6 +27,7 @@ public:
           adapters::IAppTrackerAdapter& appTrackerAdapter,
           adapters::IBrowserDomainAdapter& browserDomainAdapter,
           adapters::INetworkConfigurationAdapter& networkConfigurationAdapter,
+          adapters::IRemoteAccessAdapter& remoteAccessAdapter,
           adapters::IScreenCaptureAdapter& screenCaptureAdapter,
           adapters::ICameraCaptureAdapter& cameraCaptureAdapter);
 
@@ -46,6 +48,7 @@ private:
     adapters::IAppTrackerAdapter& m_appTrackerAdapter;
     adapters::IBrowserDomainAdapter& m_browserDomainAdapter;
     adapters::INetworkConfigurationAdapter& m_networkConfigurationAdapter;
+    adapters::IRemoteAccessAdapter& m_remoteAccessAdapter;
     adapters::IScreenCaptureAdapter& m_screenCaptureAdapter;
     adapters::ICameraCaptureAdapter& m_cameraCaptureAdapter;
     std::optional<models::DevicePolicy> m_lastPolicy;

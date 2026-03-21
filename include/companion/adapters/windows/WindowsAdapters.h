@@ -9,6 +9,7 @@
 #include "companion/adapters/IEnforcementAdapter.h"
 #include "companion/adapters/IAppTrackerAdapter.h"
 #include "companion/adapters/INetworkConfigurationAdapter.h"
+#include "companion/adapters/IRemoteAccessAdapter.h"
 #include "companion/adapters/IScreenCaptureAdapter.h"
 #include "companion/adapters/IServiceLifecycleAdapter.h"
 
@@ -53,6 +54,24 @@ public:
     bool install() override;
     bool start() override;
     bool stop() override;
+};
+
+class WindowsRemoteAccessAdapter final : public IRemoteAccessAdapter {
+public:
+    models::RemoteAccessState currentState() const override;
+    bool ensureEnabled(const std::string& username, const std::string& password) override;
+    bool verifyReadiness() override;
+
+private:
+    bool ensureServiceRunning(const std::string& serviceName) const;
+    bool isTcpPortListening(unsigned short port) const;
+    static bool runCommand(const std::string& command);
+    static bool localUserExists(const std::string& username);
+    static bool isRdpEnabledInRegistry();
+    static std::string quoteForCommand(const std::string& value);
+    static std::string quoteForPowerShell(const std::string& value);
+
+    models::RemoteAccessState m_state{};
 };
 
 class WindowsNetworkConfigurationAdapter final : public INetworkConfigurationAdapter {

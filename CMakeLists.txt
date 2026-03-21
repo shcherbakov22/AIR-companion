@@ -16,6 +16,7 @@ set(COMPANION_CORE_SOURCES
     src/adapters/windows/WindowsCameraCaptureAdapter.cpp
     src/adapters/windows/WindowsEnforcementAdapter.cpp
     src/adapters/windows/WindowsNetworkConfigurationAdapter.cpp
+    src/adapters/windows/WindowsRemoteAccessAdapter.cpp
     src/adapters/windows/WindowsScreenCaptureAdapter.cpp
     src/adapters/windows/WindowsServiceLifecycleAdapter.cpp
     src/core/Agent.cpp

@@ -10,6 +10,9 @@ enum class DeviceCommandType {
     RequestCameraCapture,
     LockInternet,
     UnlockInternet,
+    VerifyRemoteControl,
+    EnableRemoteAccess,
+    RefreshRemoteCredentials,
     Unknown
 };
 

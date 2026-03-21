@@ -149,6 +149,15 @@ models::DeviceCommandType parseCommandType(const std::string& type) {
     if (type == "unlock_internet") {
         return models::DeviceCommandType::UnlockInternet;
     }
+    if (type == "verify_remote_control") {
+        return models::DeviceCommandType::VerifyRemoteControl;
+    }
+    if (type == "enable_remote_access") {
+        return models::DeviceCommandType::EnableRemoteAccess;
+    }
+    if (type == "refresh_remote_credentials") {
+        return models::DeviceCommandType::RefreshRemoteCredentials;
+    }
     return models::DeviceCommandType::Unknown;
 }
 
