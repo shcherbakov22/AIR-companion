@@ -100,14 +100,17 @@ bool extractJsonBool(const std::string& body, const std::string& key, bool fallb
     return fallback;
 }
 
-std::string jsonArray(const std::vector<std::string>& values) {
+std::string jsonOpenAppsArray(const std::vector<models::OpenAppEntry>& values) {
     std::ostringstream out;
     out << "[";
     for (std::size_t index = 0; index < values.size(); ++index) {
         if (index > 0) {
             out << ",";
         }
-        out << jsonString(values[index]);
+        out << "{"
+            << "\"app_name\":" << jsonString(values[index].appName) << ","
+            << "\"window_title\":" << jsonString(values[index].windowTitle)
+            << "}";
     }
     out << "]";
     return out.str();
@@ -264,7 +267,7 @@ bool CompanionApiClient::sendHeartbeat(const std::string& deviceToken,
          << "\"focused_app\":" << jsonString(snapshot.focusedApp) << ","
          << "\"focused_window_title\":" << jsonString(snapshot.focusedWindowTitle) << ","
          << "\"active_browser_domain\":" << jsonString(snapshot.activeBrowserDomain) << ","
-         << "\"open_apps\":" << jsonArray(snapshot.openApps) << ","
+         << "\"open_apps\":" << jsonOpenAppsArray(snapshot.openApps) << ","
          << "\"dns_ipv4\":" << jsonString(snapshot.networkIdentity.dnsIpv4) << ","
          << "\"air_gateway_state\":" << jsonString(networkState)
          << "}}";
@@ -303,7 +306,7 @@ bool CompanionApiClient::sendActivity(const std::string& deviceToken, const mode
                  << "\"window_title\":" << jsonString(snapshot.focusedWindowTitle) << ","
                  << "\"browser_domain\":" << jsonString(snapshot.activeBrowserDomain) << ","
                  << "\"payload\":{"
-                 << "\"apps\":" << jsonArray(snapshot.openApps)
+                 << "\"apps\":" << jsonOpenAppsArray(snapshot.openApps)
                  << "}}";
 
     const auto openAppsResponse = m_httpClient.post(

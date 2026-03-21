@@ -8,11 +8,16 @@
 
 namespace companion::models {
 
+struct OpenAppEntry {
+    std::string appName;
+    std::string windowTitle;
+};
+
 struct ActivitySnapshot {
     std::string focusedApp;
     std::string focusedWindowTitle;
     std::string activeBrowserDomain;
-    std::vector<std::string> openApps;
+    std::vector<OpenAppEntry> openApps;
     NetworkIdentity networkIdentity;
     RemoteAccessState remoteAccessState;
 };

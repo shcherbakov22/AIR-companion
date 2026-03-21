@@ -30,6 +30,7 @@ int printUsage() {
     std::cerr
         << "AIR Companion utility modes:\n"
         << "  --capture-screen-once <output-directory>\n"
+        << "  --snapshot-apps-once <output-file>\n"
         << "  --remote-helper --port <port> --state-file <path>\n"
         << "  --write-enrollment --base-url <url> --username <name> --password <password> [--device-label <label>] [--root-ca-url <url>]\n"
         << "  --print-enrollment-path\n"
@@ -43,6 +44,11 @@ int main(int argc, char* argv[]) {
     if (const auto* outputDirectory = argumentValue(argc, argv, "--capture-screen-once"); outputDirectory != nullptr) {
         companion::adapters::windows::WindowsScreenCaptureAdapter screenCaptureAdapter;
         return screenCaptureAdapter.captureToFile(outputDirectory).has_value() ? 0 : 1;
+    }
+
+    if (const auto* outputFile = argumentValue(argc, argv, "--snapshot-apps-once"); outputFile != nullptr) {
+        companion::adapters::windows::WindowsAppTrackerAdapter appTrackerAdapter;
+        return appTrackerAdapter.writeSnapshotToFile(outputFile) ? 0 : 1;
     }
 
     if (hasArgument(argc, argv, "--remote-helper")) {

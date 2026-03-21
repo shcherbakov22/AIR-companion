@@ -33,6 +33,11 @@ public:
 class WindowsAppTrackerAdapter final : public IAppTrackerAdapter {
 public:
     models::ActivitySnapshot snapshot() const override;
+    bool writeSnapshotToFile(const std::string& outputPath) const;
+
+private:
+    models::ActivitySnapshot collectInteractiveSnapshot() const;
+    std::optional<models::ActivitySnapshot> captureViaActiveSessionHelper() const;
 };
 
 class WindowsBrowserDomainAdapter final : public IBrowserDomainAdapter {
