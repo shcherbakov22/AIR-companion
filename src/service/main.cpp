@@ -19,8 +19,10 @@ int main() {
         companion::service::EnrollmentRequestStore enrollmentRequestStore;
         const auto requestPath = enrollmentRequestStore.requestPath();
         (void) enrollmentRequestStore.saveTemplate();
-        std::cerr << "AIR Companion service bootstrap failed. Fill enrollment details in " << requestPath
-                  << " or set AIR_COMPANION_USERNAME, AIR_COMPANION_PASSWORD, and optional AIR_COMPANION_ROOT_CA_URL for first enrollment." << '\n';
+        std::cerr << "AIR Companion service bootstrap failed. Write enrollment details to " << requestPath
+                  << " using air_companion_tray --write-enrollment --base-url <url> --username <name> --password <password>"
+                  << " [--device-label <label>] [--root-ca-url <url>] or set AIR_COMPANION_USERNAME, AIR_COMPANION_PASSWORD,"
+                  << " and optional AIR_COMPANION_ROOT_CA_URL for first enrollment." << '\n';
         return 1;
     }
 

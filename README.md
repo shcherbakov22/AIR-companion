@@ -8,8 +8,9 @@ This app is split into two binaries:
   - background agent / service host
   - handles enrollment, token persistence, policy polling, heartbeats, activity uploads, capture scheduling, and command execution
 - `air_companion_tray`
-  - small tray-facing UI shell
-  - surfaces current student identity, connection state, policy state, and diagnostics
+  - helper / utility host
+  - runs interactive helper modes such as remote control and one-shot screen capture
+  - manages the machine-local enrollment request file from the command line
 
 ## Current status
 
@@ -24,11 +25,11 @@ This directory contains the initial implementation scaffold for the new companio
 - persisted local config under `%APPDATA%\\AIRCompanion\\config.json`
 - optional root CA download URL persisted with the local config
 - hidden internal capture settings under `%PROGRAMDATA%\\AIRCompanion\\Internal\\capture-settings.json`
-- first-run bootstrap through a native enrollment window in the tray app
+- first-run bootstrap through a machine-local enrollment request file
 - Windows trusted-root bootstrap for the AIR platform certificate
 - automatic startup through the Windows Service Control Manager
 - service host entry point
-- tray app entry point
+- helper / utility entry point
 - Visual Studio-friendly CMake build files
 
 ## Build
@@ -70,7 +71,7 @@ ctest -C Debug --output-on-failure --test-dir build\windows-debug
 - `src/service/`
   - Windows service/agent host
 - `src/tray/`
-  - tray process and small diagnostics shell
+  - helper process entrypoints for remote control and capture
 
 ## Backend contract
 
@@ -92,12 +93,15 @@ This app targets only the current AIR platform. It expects the companion API gro
 
 - V1 is Windows-first and structured for Linux adapters later.
 - Internet policy is currently paused; the companion reports network identity but does not rewrite gateway or DNS.
-- First enrollment now happens through a small native window when the tray starts without a saved config.
+- First enrollment now happens through the hidden machine-local enrollment request file consumed by the service.
 - Enrollment/settings can also carry an optional root CA URL when the AIR platform serves its trusted root certificate from a custom endpoint.
-- Successful tray startup now best-effort installs `air_companion_service.exe` as an auto-start Windows service.
 - `air_companion_service.exe` now runs as a real SCM-managed service when started by Windows, and falls back to console mode when launched directly.
-- You can reopen enrollment settings on an installed machine with:
-  - `air_companion_tray --settings`
+- You can write enrollment settings on an installed machine with:
+  - `air_companion_tray --write-enrollment --base-url <url> --username <name> --password <password> [--device-label <label>] [--root-ca-url <url>]`
+- You can print the expected enrollment request path with:
+  - `air_companion_tray --print-enrollment-path`
+- You can clear the pending enrollment request with:
+  - `air_companion_tray --clear-enrollment`
 - Headless bootstrap also accepts `AIR_COMPANION_ROOT_CA_URL` for the same override.
 - Screen/camera capture behavior is also driven by a separate hidden machine-level settings file for:
   - local capture enablement

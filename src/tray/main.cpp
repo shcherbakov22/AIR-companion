@@ -1,17 +1,6 @@
 #include "companion/adapters/windows/WindowsAdapters.h"
-#include "companion/core/Agent.h"
-#include "companion/core/CaptureScheduler.h"
-#include "companion/core/CommandPoller.h"
-#include "companion/core/EnforcementCoordinator.h"
-#include "companion/core/PolicySync.h"
-#include "companion/networking/CompanionApiClient.h"
-#include "companion/service/Bootstrap.h"
-#include "companion/service/CaptureSettingsStore.h"
-#include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
-#include "companion/tray/EnrollmentWindow.h"
 #include "companion/tray/RemoteControlHelper.h"
-#include "companion/tray/TrayApplication.h"
 
 #include <iostream>
 
@@ -37,34 +26,15 @@ const char* argumentValue(int argc, char* argv[], const char* expected) {
     return nullptr;
 }
 
-companion::service::EnrollmentRequest initialEnrollmentRequest() {
-    companion::service::EnrollmentRequestStore enrollmentRequestStore;
-    companion::service::CompanionConfigStore configStore;
-
-    auto draft = enrollmentRequestStore.loadDraft().value_or(companion::service::EnrollmentRequest{
-        "https://192.168.11.228",
-        {},
-        {},
-        {},
-        {},
-    });
-
-    if (const auto stored = configStore.load(); stored.has_value()) {
-        if (draft.baseUrl.empty()) {
-            draft.baseUrl = stored->baseUrl;
-        }
-        if (draft.username.empty()) {
-            draft.username = stored->identity.studentUsername;
-        }
-        if (draft.deviceLabel.empty()) {
-            draft.deviceLabel = stored->identity.deviceLabel;
-        }
-        if (draft.rootCaUrl.empty()) {
-            draft.rootCaUrl = stored->rootCaUrl;
-        }
-    }
-
-    return draft;
+int printUsage() {
+    std::cerr
+        << "AIR Companion utility modes:\n"
+        << "  --capture-screen-once <output-directory>\n"
+        << "  --remote-helper --port <port> --state-file <path>\n"
+        << "  --write-enrollment --base-url <url> --username <name> --password <password> [--device-label <label>] [--root-ca-url <url>]\n"
+        << "  --print-enrollment-path\n"
+        << "  --clear-enrollment\n";
+    return 1;
 }
 
 }  // namespace
@@ -85,83 +55,44 @@ int main(int argc, char* argv[]) {
         return companion::tray::runRemoteControlHelper(std::stoi(portValue), stateFilePath);
     }
 
-    companion::service::Bootstrap bootstrap;
     companion::service::EnrollmentRequestStore enrollmentRequestStore;
-    companion::service::CompanionConfigStore configStore;
 
-    if (hasArgument(argc, argv, "--settings")) {
-        const auto request = companion::tray::EnrollmentWindow::prompt(
-            initialEnrollmentRequest(),
-            "Update AIR enrollment details for this device."
-        );
+    if (hasArgument(argc, argv, "--print-enrollment-path")) {
+        std::cout << enrollmentRequestStore.requestPath() << '\n';
+        return 0;
+    }
 
-        if (!request.has_value() || !enrollmentRequestStore.save(*request)) {
-            std::cerr << "AIR Companion settings cancelled." << '\n';
+    if (hasArgument(argc, argv, "--clear-enrollment")) {
+        return enrollmentRequestStore.clear() ? 0 : 1;
+    }
+
+    if (hasArgument(argc, argv, "--write-enrollment")) {
+        const auto* baseUrl = argumentValue(argc, argv, "--base-url");
+        const auto* username = argumentValue(argc, argv, "--username");
+        const auto* password = argumentValue(argc, argv, "--password");
+        if (baseUrl == nullptr || username == nullptr || password == nullptr) {
+            return printUsage();
+        }
+
+        companion::service::EnrollmentRequest request{
+            .baseUrl = baseUrl,
+            .username = username,
+            .password = password,
+            .deviceLabel = argumentValue(argc, argv, "--device-label") != nullptr
+                ? argumentValue(argc, argv, "--device-label")
+                : std::string{},
+            .rootCaUrl = argumentValue(argc, argv, "--root-ca-url") != nullptr
+                ? argumentValue(argc, argv, "--root-ca-url")
+                : std::string{},
+        };
+
+        if (!enrollmentRequestStore.save(request)) {
             return 1;
         }
 
-        (void) configStore.clear();
+        std::cout << enrollmentRequestStore.requestPath() << '\n';
+        return 0;
     }
 
-    auto bootstrapped = bootstrap.initialize();
-    if (!bootstrapped.has_value()) {
-        const auto request = companion::tray::EnrollmentWindow::prompt(
-            initialEnrollmentRequest(),
-            "Enter AIR credentials to enroll this device."
-        );
-
-        if (!request.has_value() || !enrollmentRequestStore.save(*request)) {
-            std::cerr << "AIR Companion tray bootstrap cancelled." << '\n';
-            return 1;
-        }
-
-        bootstrapped = bootstrap.initialize();
-        if (!bootstrapped.has_value()) {
-            std::cerr << "AIR Companion tray bootstrap failed after enrollment attempt." << '\n';
-            return 1;
-        }
-    }
-
-    companion::adapters::windows::WindowsServiceLifecycleAdapter serviceLifecycleAdapter;
-    if (!serviceLifecycleAdapter.install()) {
-        std::cerr << "AIR Companion could not install the Windows service for automatic startup." << '\n';
-    }
-
-    companion::adapters::windows::WindowsAppTrackerAdapter appTrackerAdapter;
-    companion::adapters::windows::WindowsBrowserDomainAdapter browserDomainAdapter;
-    companion::adapters::windows::WindowsScreenCaptureAdapter screenCaptureAdapter;
-    companion::adapters::windows::WindowsCameraCaptureAdapter cameraCaptureAdapter;
-    companion::adapters::windows::WindowsEnforcementAdapter enforcementAdapter;
-    companion::adapters::windows::WindowsNetworkConfigurationAdapter networkConfigurationAdapter;
-    companion::adapters::windows::WindowsRemoteAccessAdapter remoteAccessAdapter;
-    companion::service::CaptureSettingsStore captureSettingsStore;
-    const auto captureSettings = captureSettingsStore.loadOrCreate();
-
-    companion::core::PolicySync policySync(bootstrapped->apiClient, bootstrapped->config.deviceToken);
-    companion::core::CommandPoller commandPoller(bootstrapped->apiClient, bootstrapped->config.deviceToken);
-    companion::core::CaptureScheduler captureScheduler(captureSettings);
-    companion::core::EnforcementCoordinator enforcementCoordinator(enforcementAdapter);
-    companion::core::UplinkSync uplinkSync(
-        bootstrapped->apiClient,
-        bootstrapped->config.deviceToken,
-        bootstrapped->config.identity,
-        networkConfigurationAdapter
-    );
-    companion::core::Agent agent(
-        std::move(policySync),
-        std::move(commandPoller),
-        std::move(captureScheduler),
-        std::move(enforcementCoordinator),
-        std::move(uplinkSync),
-        appTrackerAdapter,
-        browserDomainAdapter,
-        networkConfigurationAdapter,
-        remoteAccessAdapter,
-        screenCaptureAdapter,
-        cameraCaptureAdapter
-    );
-
-    companion::tray::TrayApplication trayApplication(agent);
-    std::cout << bootstrapped->status << '\n';
-    return trayApplication.run();
+    return printUsage();
 }

@@ -51,9 +51,7 @@ set(COMPANION_CORE_SOURCES
     src/service/EnrollmentRequestStore.cpp
     src/service/ServiceHost.cpp
     src/service/TrustedRootInstaller.cpp
-    src/tray/EnrollmentWindow.cpp
     src/tray/RemoteControlHelper.cpp
-    src/tray/TrayApplication.cpp
 )
 
 add_library(air_companion_core STATIC ${COMPANION_CORE_SOURCES})
