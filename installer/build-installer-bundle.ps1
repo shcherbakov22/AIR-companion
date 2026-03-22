@@ -5,12 +5,15 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$sourceDirectory = Join-Path $repoRoot "dist\\air-companion-windows-0.1.1"
+$sourceDirectory = Join-Path $repoRoot "build\\windows-debug\\$Configuration"
 $bundleDirectory = Join-Path $repoRoot "dist\\air-companion-windows-installer-0.1.1"
 $bundleZip = "$bundleDirectory.zip"
 
-if (-not (Test-Path $sourceDirectory)) {
-    throw "Missing source directory: $sourceDirectory"
+foreach ($requiredFile in @('air_companion_service.exe', 'air_companion_tray.exe', 'air_companion_updater.exe')) {
+    $path = Join-Path $sourceDirectory $requiredFile
+    if (-not (Test-Path $path)) {
+        throw "Missing built payload file: $path"
+    }
 }
 
 if (Test-Path $bundleDirectory) {
@@ -18,7 +21,9 @@ if (Test-Path $bundleDirectory) {
 }
 
 New-Item -ItemType Directory -Force -Path $bundleDirectory | Out-Null
-Copy-Item -Path (Join-Path $sourceDirectory '*') -Destination $bundleDirectory -Recurse -Force
+Copy-Item -Path (Join-Path $sourceDirectory 'air_companion_service.exe') -Destination $bundleDirectory -Force
+Copy-Item -Path (Join-Path $sourceDirectory 'air_companion_tray.exe') -Destination $bundleDirectory -Force
+Copy-Item -Path (Join-Path $sourceDirectory 'air_companion_updater.exe') -Destination $bundleDirectory -Force
 Copy-Item -Path (Join-Path $PSScriptRoot 'install-companion.ps1') -Destination (Join-Path $bundleDirectory 'install-companion.ps1') -Force
 
 if (Test-Path $bundleZip) {
