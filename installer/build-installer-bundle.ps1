@@ -1,11 +1,12 @@
 param(
-    [string]$Configuration = 'Debug'
+    [string]$Configuration = 'Release'
 )
 
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$sourceDirectory = Join-Path $repoRoot "build\\windows-debug\\$Configuration"
+$presetDirectory = if ($Configuration -eq 'Release') { 'windows-release' } else { 'windows-debug' }
+$sourceDirectory = Join-Path $repoRoot "build\\$presetDirectory\\$Configuration"
 $bundleDirectory = Join-Path $repoRoot "dist\\air-companion-windows-installer-0.1.1"
 $bundleZip = "$bundleDirectory.zip"
 

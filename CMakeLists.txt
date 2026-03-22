@@ -7,10 +7,14 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-enable_testing()
+
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 include(FetchContent)
 
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(WITH_ZLIB OFF CACHE BOOL "" FORCE)
 set(WITH_OPENSSL OFF CACHE BOOL "" FORCE)
 set(WITH_GNUTLS OFF CACHE BOOL "" FORCE)
@@ -25,6 +29,8 @@ FetchContent_Declare(
     URL https://github.com/LibVNC/libvncserver/archive/refs/tags/LibVNCServer-0.9.14.tar.gz
 )
 FetchContent_MakeAvailable(libvncserver)
+
+enable_testing()
 
 set(COMPANION_CORE_SOURCES
     src/networking/HttpClient.cpp
