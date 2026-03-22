@@ -133,6 +133,59 @@ std::optional<int> jsonIntValue(const std::string& body, const std::string& key)
     return std::stoi(body.substr(numberStart, numberEnd - numberStart));
 }
 
+std::vector<std::string> jsonStringArray(const std::string& body, const std::string& key) {
+    const auto keyPos = body.find("\"" + key + "\"");
+    if (keyPos == std::string::npos) {
+        return {};
+    }
+
+    const auto arrayStart = body.find('[', keyPos);
+    if (arrayStart == std::string::npos) {
+        return {};
+    }
+
+    std::vector<std::string> values;
+    bool inString = false;
+    bool escaped = false;
+    std::string current;
+
+    for (std::size_t index = arrayStart + 1; index < body.size(); ++index) {
+        const char ch = body[index];
+        if (!inString && ch == ']') {
+            break;
+        }
+
+        if (inString) {
+            if (escaped) {
+                current += ch;
+                escaped = false;
+                continue;
+            }
+
+            if (ch == '\\') {
+                escaped = true;
+                continue;
+            }
+
+            if (ch == '"') {
+                values.push_back(current);
+                current.clear();
+                inString = false;
+                continue;
+            }
+
+            current += ch;
+            continue;
+        }
+
+        if (ch == '"') {
+            inString = true;
+        }
+    }
+
+    return values;
+}
+
 models::DeviceCommandType parseCommandType(const std::string& type) {
     if (type == "refresh_policy") {
         return models::DeviceCommandType::RefreshPolicy;
@@ -231,6 +284,10 @@ std::optional<models::DevicePolicy> parsePolicyResponse(const std::string& respo
             } else {
                 policy.internetAccessMode = models::InternetAccessMode::BlockAll;
             }
+        }
+
+        if (const auto appControl = jsonObjectString(*policyBody, "app_control"); appControl.has_value()) {
+            policy.blockedApps = jsonStringArray(*appControl, "blocked_processes");
         }
     }
 

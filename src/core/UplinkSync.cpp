@@ -10,6 +10,7 @@ namespace {
 
 constexpr auto kHeartbeatInterval = std::chrono::seconds(10);
 constexpr auto kActivityInterval = std::chrono::seconds(30);
+constexpr auto kInstalledAppsInterval = std::chrono::hours(12);
 
 }  // namespace
 
@@ -59,6 +60,16 @@ void UplinkSync::sync(const models::ActivitySnapshot& snapshot, const std::optio
             m_status = "activity failed";
         }
     }
+
+    if (shouldSendInstalledApps(now)) {
+        if (m_apiClient.sendInstalledApps(m_deviceToken, updatedSnapshot.installedApps)) {
+            m_lastInstalledAppsAt = now;
+            m_hasInstalledApps = true;
+            m_status = "installed apps ok; " + m_networkConfigurationAdapter.describeState();
+        } else {
+            m_status = "installed apps failed";
+        }
+    }
 }
 
 bool UplinkSync::uploadScreenCapture(const std::string& filePath,
@@ -83,6 +94,10 @@ bool UplinkSync::shouldSendHeartbeat(std::chrono::steady_clock::time_point now) 
 
 bool UplinkSync::shouldSendActivity(std::chrono::steady_clock::time_point now) const {
     return !m_hasActivity || (now - m_lastActivityAt) >= kActivityInterval;
+}
+
+bool UplinkSync::shouldSendInstalledApps(std::chrono::steady_clock::time_point now) const {
+    return !m_hasInstalledApps || (now - m_lastInstalledAppsAt) >= kInstalledAppsInterval;
 }
 
 std::optional<std::string> UplinkSync::gatewayHostIpv4() const {

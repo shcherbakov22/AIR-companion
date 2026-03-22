@@ -31,6 +31,7 @@ public:
 private:
     bool shouldSendHeartbeat(std::chrono::steady_clock::time_point now) const;
     bool shouldSendActivity(std::chrono::steady_clock::time_point now) const;
+    bool shouldSendInstalledApps(std::chrono::steady_clock::time_point now) const;
     std::optional<std::string> gatewayHostIpv4() const;
 
     networking::CompanionApiClient m_apiClient;
@@ -39,8 +40,10 @@ private:
     adapters::INetworkConfigurationAdapter& m_networkConfigurationAdapter;
     std::chrono::steady_clock::time_point m_lastHeartbeatAt{};
     std::chrono::steady_clock::time_point m_lastActivityAt{};
+    std::chrono::steady_clock::time_point m_lastInstalledAppsAt{};
     bool m_hasHeartbeat{false};
     bool m_hasActivity{false};
+    bool m_hasInstalledApps{false};
     std::string m_status{"uplink idle"};
 };
 

@@ -283,6 +283,60 @@ BOOL CALLBACK collectTopLevelWindows(HWND window, LPARAM lParam) {
 
     return TRUE;
 }
+
+std::optional<std::wstring> readRegistryString(HKEY key, const wchar_t* name) {
+    DWORD type = 0;
+    DWORD size = 0;
+    if (RegQueryValueExW(key, name, nullptr, &type, nullptr, &size) != ERROR_SUCCESS || type != REG_SZ || size == 0) {
+        return std::nullopt;
+    }
+
+    std::wstring value(size / sizeof(wchar_t), L'\0');
+    if (RegQueryValueExW(key, name, nullptr, nullptr, reinterpret_cast<LPBYTE>(value.data()), &size) != ERROR_SUCCESS) {
+        return std::nullopt;
+    }
+
+    value.resize(wcsnlen(value.c_str(), value.size()));
+    return value;
+}
+
+void collectInstalledAppsFromUninstallKey(
+    HKEY root,
+    const wchar_t* path,
+    const std::string& source,
+    std::vector<companion::models::InstalledAppEntry>& apps
+) {
+    HKEY uninstallKey = nullptr;
+    if (RegOpenKeyExW(root, path, 0, KEY_READ, &uninstallKey) != ERROR_SUCCESS) {
+        return;
+    }
+
+    DWORD index = 0;
+    wchar_t subKeyName[256];
+    DWORD subKeyNameSize = sizeof(subKeyName) / sizeof(wchar_t);
+    while (RegEnumKeyExW(uninstallKey, index++, subKeyName, &subKeyNameSize, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+        HKEY appKey = nullptr;
+        if (RegOpenKeyExW(uninstallKey, subKeyName, 0, KEY_READ, &appKey) == ERROR_SUCCESS) {
+            const auto displayName = readRegistryString(appKey, L"DisplayName");
+            if (displayName.has_value() && !displayName->empty()) {
+                companion::models::InstalledAppEntry entry;
+                entry.displayName = narrow(*displayName);
+                entry.appName = narrow(readRegistryString(appKey, L"DisplayIcon").value_or(*displayName));
+                entry.displayVersion = narrow(readRegistryString(appKey, L"DisplayVersion").value_or(L""));
+                entry.publisher = narrow(readRegistryString(appKey, L"Publisher").value_or(L""));
+                entry.installLocation = narrow(readRegistryString(appKey, L"InstallLocation").value_or(L""));
+                entry.source = source;
+                apps.push_back(std::move(entry));
+            }
+
+            RegCloseKey(appKey);
+        }
+
+        subKeyNameSize = sizeof(subKeyName) / sizeof(wchar_t);
+    }
+
+    RegCloseKey(uninstallKey);
+}
 #endif
 
 }  // namespace
@@ -301,6 +355,36 @@ models::ActivitySnapshot WindowsAppTrackerAdapter::snapshot() const {
 #endif
 
     return {};
+}
+
+std::vector<models::InstalledAppEntry> WindowsAppTrackerAdapter::installedApps() const {
+#ifdef _WIN32
+    std::vector<models::InstalledAppEntry> apps;
+    collectInstalledAppsFromUninstallKey(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", "registry_hklm", apps);
+    collectInstalledAppsFromUninstallKey(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall", "registry_hklm_wow6432", apps);
+    collectInstalledAppsFromUninstallKey(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", "registry_hkcu", apps);
+
+    std::unordered_set<std::string> seen;
+    std::vector<models::InstalledAppEntry> deduped;
+    for (auto& app : apps) {
+        const auto key = trim(app.displayName) + "\n" + trim(app.displayVersion) + "\n" + trim(app.publisher);
+        if (!seen.insert(key).second) {
+            continue;
+        }
+        if (trim(app.appName).empty()) {
+            app.appName = app.displayName;
+        }
+        deduped.push_back(std::move(app));
+    }
+
+    std::sort(deduped.begin(), deduped.end(), [](const auto& left, const auto& right) {
+        return left.displayName < right.displayName;
+    });
+
+    return deduped;
+#else
+    return {};
+#endif
 }
 
 bool WindowsAppTrackerAdapter::writeSnapshotToFile(const std::string& outputPath) const {

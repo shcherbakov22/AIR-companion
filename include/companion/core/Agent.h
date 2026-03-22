@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <optional>
 
@@ -55,6 +56,9 @@ private:
     adapters::IScreenCaptureAdapter& m_screenCaptureAdapter;
     adapters::ICameraCaptureAdapter& m_cameraCaptureAdapter;
     std::optional<models::DevicePolicy> m_lastPolicy;
+    std::vector<models::InstalledAppEntry> m_cachedInstalledApps;
+    std::chrono::steady_clock::time_point m_lastInstalledAppsCollectedAt{};
+    bool m_hasInstalledAppsCache{false};
     bool m_running{false};
     std::string m_status{"idle"};
 };

@@ -116,6 +116,26 @@ std::string jsonOpenAppsArray(const std::vector<models::OpenAppEntry>& values) {
     return out.str();
 }
 
+std::string jsonInstalledAppsArray(const std::vector<models::InstalledAppEntry>& values) {
+    std::ostringstream out;
+    out << "[";
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        out << "{"
+            << "\"app_name\":" << jsonString(values[index].appName) << ","
+            << "\"display_name\":" << jsonString(values[index].displayName) << ","
+            << "\"display_version\":" << jsonString(values[index].displayVersion) << ","
+            << "\"publisher\":" << jsonString(values[index].publisher) << ","
+            << "\"install_location\":" << jsonString(values[index].installLocation) << ","
+            << "\"source\":" << jsonString(values[index].source)
+            << "}";
+    }
+    out << "]";
+    return out.str();
+}
+
 void appendDebugLog(const std::string& line) {
 #ifdef _WIN32
     const char* appData = std::getenv("APPDATA");
@@ -317,6 +337,23 @@ bool CompanionApiClient::sendActivity(const std::string& deviceToken, const mode
 
     return focusedResponse.statusCode >= 200 && focusedResponse.statusCode < 300
         && openAppsResponse.statusCode >= 200 && openAppsResponse.statusCode < 300;
+}
+
+bool CompanionApiClient::sendInstalledApps(const std::string& deviceToken, const std::vector<models::InstalledAppEntry>& apps) const {
+    std::ostringstream body;
+    body << "{"
+         << "\"event_type\":\"installed_apps\","
+         << "\"payload\":{"
+         << "\"apps\":" << jsonInstalledAppsArray(apps)
+         << "}}";
+
+    const auto response = m_httpClient.post(
+        m_baseUrl + "/api/companion/activity",
+        jsonHeaders(deviceToken),
+        body.str()
+    );
+
+    return response.statusCode >= 200 && response.statusCode < 300;
 }
 
 bool CompanionApiClient::uploadScreenCapture(const std::string& deviceToken,

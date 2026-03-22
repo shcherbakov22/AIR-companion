@@ -33,6 +33,7 @@ public:
 class WindowsAppTrackerAdapter final : public IAppTrackerAdapter {
 public:
     models::ActivitySnapshot snapshot() const override;
+    std::vector<models::InstalledAppEntry> installedApps() const override;
     bool writeSnapshotToFile(const std::string& outputPath) const;
 
 private:

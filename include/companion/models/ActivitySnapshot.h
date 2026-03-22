@@ -13,11 +13,21 @@ struct OpenAppEntry {
     std::string windowTitle;
 };
 
+struct InstalledAppEntry {
+    std::string appName;
+    std::string displayName;
+    std::string displayVersion;
+    std::string publisher;
+    std::string installLocation;
+    std::string source;
+};
+
 struct ActivitySnapshot {
     std::string focusedApp;
     std::string focusedWindowTitle;
     std::string activeBrowserDomain;
     std::vector<OpenAppEntry> openApps;
+    std::vector<InstalledAppEntry> installedApps;
     NetworkIdentity networkIdentity;
     RemoteAccessState remoteAccessState;
 };

@@ -10,6 +10,7 @@
 namespace companion::core {
 
 namespace {
+constexpr auto kInstalledAppsRefreshInterval = std::chrono::minutes(10);
 
 std::optional<std::string> jsonStringValue(const std::string& body, const std::string& key) {
     const auto keyPos = body.find("\"" + key + "\"");
@@ -108,7 +109,15 @@ void Agent::tick() {
         return;
     }
 
-    const auto snapshot = currentSnapshot();
+    const auto now = std::chrono::steady_clock::now();
+    if (!m_hasInstalledAppsCache || (now - m_lastInstalledAppsCollectedAt) >= kInstalledAppsRefreshInterval) {
+        m_cachedInstalledApps = m_appTrackerAdapter.installedApps();
+        m_lastInstalledAppsCollectedAt = now;
+        m_hasInstalledAppsCache = true;
+    }
+
+    auto snapshot = currentSnapshot();
+    snapshot.installedApps = m_cachedInstalledApps;
     auto policy = m_policySync.refresh();
     if (policy.has_value()) {
         m_captureScheduler.updatePolicy(*policy);
@@ -166,7 +175,6 @@ void Agent::tick() {
         m_commandPoller.submitResult(command.id, success, output);
     }
 
-    const auto now = std::chrono::steady_clock::now();
     if (m_captureScheduler.shouldCaptureScreen(now)) {
         const auto path = m_screenCaptureAdapter.captureToFile(m_captureScheduler.settings().screenOutputDirectory);
         if (path.has_value()) {
