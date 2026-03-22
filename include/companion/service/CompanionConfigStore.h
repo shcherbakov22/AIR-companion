@@ -20,9 +20,13 @@ public:
     bool save(const StoredCompanionConfig& config) const;
     bool clear() const;
     std::string configPath() const;
+    std::string backupConfigPath() const;
 
 private:
     static std::string configDirectory();
+    static std::optional<StoredCompanionConfig> loadFromPath(const std::string& path);
+    static bool saveToPath(const std::string& path, const StoredCompanionConfig& config);
+    static std::string machineConfigDirectory();
 };
 
 }  // namespace companion::service

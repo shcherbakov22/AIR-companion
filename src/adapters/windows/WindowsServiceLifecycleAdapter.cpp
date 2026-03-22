@@ -11,6 +11,27 @@ namespace {
 constexpr wchar_t kServiceName[] = L"AIRCompanion";
 constexpr wchar_t kServiceDisplayName[] = L"AIR Companion";
 
+bool configureServiceRecovery(SC_HANDLE service) {
+    SC_ACTION actions[3]{};
+    actions[0].Type = SC_ACTION_RESTART;
+    actions[0].Delay = 5000;
+    actions[1].Type = SC_ACTION_RESTART;
+    actions[1].Delay = 15000;
+    actions[2].Type = SC_ACTION_RESTART;
+    actions[2].Delay = 30000;
+
+    SERVICE_FAILURE_ACTIONSW failureActions{};
+    failureActions.dwResetPeriod = 86400;
+    failureActions.cActions = 3;
+    failureActions.lpsaActions = actions;
+
+    SERVICE_DELAYED_AUTO_START_INFO delayedAutoStart{};
+    delayedAutoStart.fDelayedAutostart = TRUE;
+
+    return ChangeServiceConfig2W(service, SERVICE_CONFIG_FAILURE_ACTIONS, &failureActions) != FALSE
+        && ChangeServiceConfig2W(service, SERVICE_CONFIG_DELAYED_AUTO_START_INFO, &delayedAutoStart) != FALSE;
+}
+
 std::wstring currentBinaryPath() {
     std::wstring path(4096, L'\0');
     const auto copied = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
@@ -128,6 +149,7 @@ bool WindowsServiceLifecycleAdapter::install() {
 
     const bool ok = service != nullptr;
     if (service != nullptr) {
+        (void) configureServiceRecovery(service);
         deleteLegacyStartupTask();
         CloseServiceHandle(service);
     }

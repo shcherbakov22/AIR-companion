@@ -72,8 +72,7 @@ std::optional<std::string> extractJsonString(const std::string& body, const std:
 
 }  // namespace
 
-std::optional<StoredCompanionConfig> CompanionConfigStore::load() const {
-    const auto path = configPath();
+std::optional<StoredCompanionConfig> CompanionConfigStore::loadFromPath(const std::string& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input.is_open()) {
         return std::nullopt;
@@ -101,15 +100,36 @@ std::optional<StoredCompanionConfig> CompanionConfigStore::load() const {
     return config;
 }
 
-bool CompanionConfigStore::save(const StoredCompanionConfig& config) const {
-    const auto directory = configDirectory();
+std::optional<StoredCompanionConfig> CompanionConfigStore::load() const {
+    const auto primary = loadFromPath(configPath());
+    if (primary.has_value()) {
+        return primary;
+    }
+
+    const auto backup = loadFromPath(backupConfigPath());
+    if (backup.has_value()) {
+        (void) save(*backup);
+        return backup;
+    }
+
+    const auto machine = loadFromPath(machineConfigDirectory() + "\\config.json");
+    if (machine.has_value()) {
+        (void) save(*machine);
+        return machine;
+    }
+
+    return std::nullopt;
+}
+
+bool CompanionConfigStore::saveToPath(const std::string& path, const StoredCompanionConfig& config) {
+    const auto directory = std::filesystem::path(path).parent_path().string();
     std::error_code error;
     std::filesystem::create_directories(directory, error);
     if (error) {
         return false;
     }
 
-    std::ofstream output(configPath(), std::ios::binary | std::ios::trunc);
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output.is_open()) {
         return false;
     }
@@ -130,14 +150,28 @@ bool CompanionConfigStore::save(const StoredCompanionConfig& config) const {
     return output.good();
 }
 
+bool CompanionConfigStore::save(const StoredCompanionConfig& config) const {
+    const auto primarySaved = saveToPath(configPath(), config);
+    const auto backupSaved = saveToPath(backupConfigPath(), config);
+    const auto machineSaved = saveToPath(machineConfigDirectory() + "\\config.json", config);
+
+    return primarySaved || backupSaved || machineSaved;
+}
+
 bool CompanionConfigStore::clear() const {
     std::error_code error;
     std::filesystem::remove(configPath(), error);
+    std::filesystem::remove(backupConfigPath(), error);
+    std::filesystem::remove(machineConfigDirectory() + "\\config.json", error);
     return !error;
 }
 
 std::string CompanionConfigStore::configPath() const {
     return configDirectory() + "\\config.json";
+}
+
+std::string CompanionConfigStore::backupConfigPath() const {
+    return configDirectory() + "\\config.backup.json";
 }
 
 std::string CompanionConfigStore::configDirectory() {
@@ -146,6 +180,14 @@ std::string CompanionConfigStore::configDirectory() {
     }
 
     return ".\\AIRCompanion";
+}
+
+std::string CompanionConfigStore::machineConfigDirectory() {
+    if (const auto* programData = std::getenv("PROGRAMDATA"); programData != nullptr && *programData != '\0') {
+        return std::string(programData) + "\\AIRCompanion\\Service";
+    }
+
+    return ".\\AIRCompanion\\Service";
 }
 
 }  // namespace companion::service
