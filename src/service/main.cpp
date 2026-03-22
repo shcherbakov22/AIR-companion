@@ -14,56 +14,73 @@
 #include <iostream>
 
 int main() {
-    companion::service::Bootstrap bootstrap;
-    const auto bootstrapped = bootstrap.initialize();
-    if (!bootstrapped.has_value()) {
-        companion::service::EnrollmentRequestStore enrollmentRequestStore;
-        const auto requestPath = enrollmentRequestStore.requestPath();
-        (void) enrollmentRequestStore.saveTemplate();
-        std::cerr << "AIR Companion service bootstrap failed. Write enrollment details to " << requestPath
-                  << " using air_companion_tray --write-enrollment --base-url <url> --username <name> --password <password>"
-                  << " [--device-label <label>] [--root-ca-url <url>] or set AIR_COMPANION_USERNAME, AIR_COMPANION_PASSWORD,"
-                  << " and optional AIR_COMPANION_ROOT_CA_URL for first enrollment." << '\n';
-        return 1;
-    }
+    companion::service::ServiceHost serviceHost([](companion::service::ServiceHost& host) {
+        companion::service::Bootstrap bootstrap;
+        const auto bootstrapped = bootstrap.initialize();
+        if (!bootstrapped.has_value()) {
+            companion::service::EnrollmentRequestStore enrollmentRequestStore;
+            const auto requestPath = enrollmentRequestStore.requestPath();
+            (void) enrollmentRequestStore.saveTemplate();
+            host.setLastStatus("bootstrap failed");
+            std::cerr << "AIR Companion service bootstrap failed. Write enrollment details to " << requestPath
+                      << " using air_companion_tray --write-enrollment --base-url <url> --username <name> --password <password>"
+                      << " [--device-label <label>] [--root-ca-url <url>] or set AIR_COMPANION_USERNAME, AIR_COMPANION_PASSWORD,"
+                      << " and optional AIR_COMPANION_ROOT_CA_URL for first enrollment." << '\n';
+            return;
+        }
 
-    companion::adapters::windows::WindowsAppTrackerAdapter appTrackerAdapter;
-    companion::adapters::windows::WindowsBrowserDomainAdapter browserDomainAdapter;
-    companion::adapters::windows::WindowsScreenCaptureAdapter screenCaptureAdapter;
-    companion::adapters::windows::WindowsCameraCaptureAdapter cameraCaptureAdapter;
-    companion::adapters::windows::WindowsEnforcementAdapter enforcementAdapter;
-    companion::adapters::windows::WindowsNetworkConfigurationAdapter networkConfigurationAdapter;
-    companion::adapters::windows::WindowsRemoteAccessAdapter remoteAccessAdapter;
-    companion::service::CaptureSettingsStore captureSettingsStore;
-    const auto captureSettings = captureSettingsStore.loadOrCreate();
+        companion::adapters::windows::WindowsAppTrackerAdapter appTrackerAdapter;
+        companion::adapters::windows::WindowsBrowserDomainAdapter browserDomainAdapter;
+        companion::adapters::windows::WindowsScreenCaptureAdapter screenCaptureAdapter;
+        companion::adapters::windows::WindowsCameraCaptureAdapter cameraCaptureAdapter;
+        companion::adapters::windows::WindowsEnforcementAdapter enforcementAdapter;
+        companion::adapters::windows::WindowsNetworkConfigurationAdapter networkConfigurationAdapter;
+        companion::adapters::windows::WindowsRemoteAccessAdapter remoteAccessAdapter;
+        companion::service::CaptureSettingsStore captureSettingsStore;
+        const auto captureSettings = captureSettingsStore.loadOrCreate();
 
-    companion::core::PolicySync policySync(bootstrapped->apiClient, bootstrapped->config.deviceToken);
-    companion::core::CommandPoller commandPoller(bootstrapped->apiClient, bootstrapped->config.deviceToken);
-    companion::core::CaptureScheduler captureScheduler(captureSettings);
-    companion::core::EnforcementCoordinator enforcementCoordinator(enforcementAdapter);
-    companion::service::UpdateCoordinator updateCoordinator(bootstrapped->apiClient, AIR_COMPANION_VERSION);
-    companion::core::UplinkSync uplinkSync(
-        bootstrapped->apiClient,
-        bootstrapped->config.deviceToken,
-        bootstrapped->config.identity,
-        networkConfigurationAdapter
-    );
-    companion::core::Agent agent(
-        std::move(policySync),
-        std::move(commandPoller),
-        std::move(captureScheduler),
-        std::move(enforcementCoordinator),
-        std::move(uplinkSync),
-        std::move(updateCoordinator),
-        appTrackerAdapter,
-        browserDomainAdapter,
-        networkConfigurationAdapter,
-        remoteAccessAdapter,
-        screenCaptureAdapter,
-        cameraCaptureAdapter
-    );
+        companion::core::PolicySync policySync(bootstrapped->apiClient, bootstrapped->config.deviceToken);
+        companion::core::CommandPoller commandPoller(bootstrapped->apiClient, bootstrapped->config.deviceToken);
+        companion::core::CaptureScheduler captureScheduler(captureSettings);
+        companion::core::EnforcementCoordinator enforcementCoordinator(enforcementAdapter);
+        companion::service::UpdateCoordinator updateCoordinator(bootstrapped->apiClient, AIR_COMPANION_VERSION);
+        companion::core::UplinkSync uplinkSync(
+            bootstrapped->apiClient,
+            bootstrapped->config.deviceToken,
+            bootstrapped->config.identity,
+            networkConfigurationAdapter
+        );
+        companion::core::Agent agent(
+            std::move(policySync),
+            std::move(commandPoller),
+            std::move(captureScheduler),
+            std::move(enforcementCoordinator),
+            std::move(uplinkSync),
+            std::move(updateCoordinator),
+            appTrackerAdapter,
+            browserDomainAdapter,
+            networkConfigurationAdapter,
+            remoteAccessAdapter,
+            screenCaptureAdapter,
+            cameraCaptureAdapter
+        );
 
-    companion::service::ServiceHost serviceHost(agent);
-    std::cout << bootstrapped->status << '\n';
+        std::cout << bootstrapped->status << '\n';
+        host.setLastStatus(bootstrapped->status);
+        agent.start();
+
+        while (!host.stopRequested() && agent.running()) {
+            agent.tick();
+            host.setLastStatus(agent.statusSummary());
+
+            const auto waitMs = host.consumeResumeRequested() ? 0UL : 1000UL;
+            if (host.waitForStop(waitMs)) {
+                break;
+            }
+        }
+
+        agent.stop();
+    });
+
     return serviceHost.run();
 }

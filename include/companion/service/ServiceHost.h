@@ -1,9 +1,8 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <thread>
-
-#include "companion/core/Agent.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -16,10 +15,16 @@ namespace companion::service {
 
 class ServiceHost {
 public:
-    explicit ServiceHost(core::Agent& agent);
+    using Worker = std::function<void(ServiceHost&)>;
+
+    explicit ServiceHost(Worker worker);
 
     int run();
     const std::string& lastStatus() const;
+    bool stopRequested() const;
+    bool consumeResumeRequested();
+    void setLastStatus(std::string status);
+    bool waitForStop(unsigned long milliseconds);
 
 private:
     int runConsoleLoop();
@@ -33,7 +38,7 @@ private:
     static unsigned long WINAPI controlHandlerThunk(unsigned long control, unsigned long eventType, void* eventData, void* context);
 #endif
 
-    core::Agent& m_agent;
+    Worker m_worker;
     std::string m_lastStatus{"idle"};
     bool m_stopRequested{false};
     bool m_resumeRequested{false};

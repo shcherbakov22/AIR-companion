@@ -24,7 +24,7 @@ constexpr wchar_t kServiceName[] = L"AIRCompanion";
 ServiceHost* ServiceHost::s_instance = nullptr;
 #endif
 
-ServiceHost::ServiceHost(core::Agent& agent) : m_agent(agent) {}
+ServiceHost::ServiceHost(Worker worker) : m_worker(std::move(worker)) {}
 
 int ServiceHost::run() {
 #ifdef _WIN32
@@ -56,16 +56,33 @@ const std::string& ServiceHost::lastStatus() const {
 int ServiceHost::runConsoleLoop() {
     m_stopRequested = false;
     m_resumeRequested = false;
-    m_agent.start();
-
-    while (!m_stopRequested && m_agent.running()) {
-        m_agent.tick();
-        m_lastStatus = m_agent.statusSummary();
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-
-    m_agent.stop();
+    m_worker(*this);
     return 0;
+}
+
+bool ServiceHost::stopRequested() const {
+    return m_stopRequested;
+}
+
+bool ServiceHost::consumeResumeRequested() {
+    const auto requested = m_resumeRequested;
+    m_resumeRequested = false;
+    return requested;
+}
+
+void ServiceHost::setLastStatus(std::string status) {
+    m_lastStatus = std::move(status);
+}
+
+bool ServiceHost::waitForStop(unsigned long milliseconds) {
+#ifdef _WIN32
+    if (m_stopEvent != nullptr) {
+        return WaitForSingleObject(m_stopEvent, milliseconds) == WAIT_OBJECT_0;
+    }
+#endif
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+    return m_stopRequested;
 }
 
 void ServiceHost::serviceMain() {
@@ -117,7 +134,6 @@ unsigned long ServiceHost::controlHandler(unsigned long control, unsigned long e
         case SERVICE_CONTROL_SHUTDOWN:
             reportStatus(SERVICE_STOP_PENDING, NO_ERROR, 5000);
             m_stopRequested = true;
-            m_agent.stop();
             if (m_stopEvent != nullptr) {
                 SetEvent(m_stopEvent);
             }
@@ -141,32 +157,13 @@ unsigned long ServiceHost::controlHandler(unsigned long control, unsigned long e
 }
 
 void ServiceHost::workerLoop() {
-    m_agent.start();
+    m_worker(*this);
 
 #ifdef _WIN32
-    while (!m_stopRequested && m_agent.running()) {
-        m_agent.tick();
-        m_lastStatus = m_agent.statusSummary();
-
-        const auto waitMs = m_resumeRequested ? 0 : 1000;
-        m_resumeRequested = false;
-        if (m_stopEvent != nullptr && WaitForSingleObject(m_stopEvent, waitMs) == WAIT_OBJECT_0) {
-            break;
-        }
-    }
-
     if (m_stopEvent != nullptr) {
         SetEvent(m_stopEvent);
     }
-#else
-    while (!m_stopRequested && m_agent.running()) {
-        m_agent.tick();
-        m_lastStatus = m_agent.statusSummary();
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
 #endif
-
-    m_agent.stop();
 }
 
 void ServiceHost::reportStatus(unsigned long currentState, unsigned long win32ExitCode, unsigned long waitHint) {
