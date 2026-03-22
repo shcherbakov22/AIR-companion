@@ -7,6 +7,7 @@ namespace companion::service {
 
 struct EnrollmentRequest {
     std::string baseUrl;
+    std::string enrollmentToken;
     std::string username;
     std::string password;
     std::string deviceLabel;

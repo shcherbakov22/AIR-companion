@@ -105,6 +105,7 @@ std::optional<EnrollmentRequest> EnrollmentRequestStore::loadDraft() const {
 
     EnrollmentRequest request;
     request.baseUrl = extractJsonString(body, "base_url").value_or({});
+    request.enrollmentToken = extractJsonString(body, "enrollment_token").value_or({});
     request.username = extractJsonString(body, "username").value_or({});
     request.password = extractJsonString(body, "password").value_or({});
     request.deviceLabel = extractJsonString(body, "device_label").value_or({});
@@ -119,7 +120,11 @@ std::optional<EnrollmentRequest> EnrollmentRequestStore::load() const {
         return std::nullopt;
     }
 
-    if (request->baseUrl.empty() || request->username.empty() || request->password.empty()) {
+    if (request->baseUrl.empty()) {
+        return std::nullopt;
+    }
+
+    if (request->enrollmentToken.empty() && (request->username.empty() || request->password.empty())) {
         return std::nullopt;
     }
 
@@ -144,6 +149,7 @@ bool EnrollmentRequestStore::save(const EnrollmentRequest& request) const {
     output
         << "{\n"
         << "  \"base_url\": \"" << escapeJson(request.baseUrl) << "\",\n"
+        << "  \"enrollment_token\": \"" << escapeJson(request.enrollmentToken) << "\",\n"
         << "  \"username\": \"" << escapeJson(request.username) << "\",\n"
         << "  \"password\": \"" << escapeJson(request.password) << "\",\n"
         << "  \"device_label\": \"" << escapeJson(request.deviceLabel) << "\",\n"
@@ -158,6 +164,7 @@ bool EnrollmentRequestStore::save(const EnrollmentRequest& request) const {
 bool EnrollmentRequestStore::saveTemplate() const {
     return save(EnrollmentRequest{
         .baseUrl = "https://192.168.11.228",
+        .enrollmentToken = {},
         .username = {},
         .password = {},
         .deviceLabel = {},

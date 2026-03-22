@@ -32,7 +32,7 @@ int printUsage() {
         << "  --capture-screen-once <output-directory>\n"
         << "  --snapshot-apps-once <output-file>\n"
         << "  --remote-helper --port <port> --state-file <path>\n"
-        << "  --write-enrollment --base-url <url> --username <name> --password <password> [--device-label <label>] [--root-ca-url <url>]\n"
+        << "  --write-enrollment --base-url <url> [--enrollment-token <token> | --username <name> --password <password>] [--device-label <label>] [--root-ca-url <url>]\n"
         << "  --print-enrollment-path\n"
         << "  --clear-enrollment\n";
     return 1;
@@ -74,14 +74,16 @@ int main(int argc, char* argv[]) {
 
     if (hasArgument(argc, argv, "--write-enrollment")) {
         const auto* baseUrl = argumentValue(argc, argv, "--base-url");
+        const auto* enrollmentToken = argumentValue(argc, argv, "--enrollment-token");
         const auto* username = argumentValue(argc, argv, "--username");
         const auto* password = argumentValue(argc, argv, "--password");
-        if (baseUrl == nullptr || username == nullptr || password == nullptr) {
+        if (baseUrl == nullptr || ((enrollmentToken == nullptr) && (username == nullptr || password == nullptr))) {
             return printUsage();
         }
 
         companion::service::EnrollmentRequest request{
             .baseUrl = baseUrl,
+            .enrollmentToken = enrollmentToken != nullptr ? enrollmentToken : std::string{},
             .username = username,
             .password = password,
             .deviceLabel = argumentValue(argc, argv, "--device-label") != nullptr

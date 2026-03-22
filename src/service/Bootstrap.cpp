@@ -35,24 +35,34 @@ std::optional<BootstrapResult> Bootstrap::initialize() const {
             return std::nullopt;
         }
 
-        if (const auto bootstrapped = initializeFromCredentials(
-            request->baseUrl,
-            request->username,
-            request->password,
-            request->deviceLabel.empty() ? defaultDeviceLabel() : request->deviceLabel,
-            request->rootCaUrl
-        ); bootstrapped.has_value()) {
+        const auto effectiveLabel = request->deviceLabel.empty() ? defaultDeviceLabel() : request->deviceLabel;
+        const auto bootstrapped = !request->enrollmentToken.empty()
+            ? initializeFromEnrollmentToken(
+                request->baseUrl,
+                request->enrollmentToken,
+                effectiveLabel,
+                request->rootCaUrl
+            )
+            : initializeFromCredentials(
+                request->baseUrl,
+                request->username,
+                request->password,
+                effectiveLabel,
+                request->rootCaUrl
+            );
+        if (bootstrapped.has_value()) {
             (void) m_enrollmentRequestStore.clear();
             return bootstrapped;
         }
     }
 
     const auto baseUrl = envOrDefault("AIR_COMPANION_BASE_URL", "https://127.0.0.1");
+    const auto enrollmentToken = envOrDefault("AIR_COMPANION_ENROLLMENT_TOKEN");
     const auto username = envOrDefault("AIR_COMPANION_USERNAME");
     const auto password = envOrDefault("AIR_COMPANION_PASSWORD");
     const auto rootCaUrl = envOrDefault("AIR_COMPANION_ROOT_CA_URL");
 
-    if (username.empty() || password.empty()) {
+    if (enrollmentToken.empty() && (username.empty() || password.empty())) {
         (void) m_enrollmentRequestStore.saveTemplate();
         return std::nullopt;
     }
@@ -61,13 +71,10 @@ std::optional<BootstrapResult> Bootstrap::initialize() const {
         return std::nullopt;
     }
 
-    const auto bootstrapped = initializeFromCredentials(
-        baseUrl,
-        username,
-        password,
-        envOrDefault("AIR_COMPANION_DEVICE_LABEL", defaultDeviceLabel()),
-        rootCaUrl
-    );
+    const auto deviceLabel = envOrDefault("AIR_COMPANION_DEVICE_LABEL", defaultDeviceLabel());
+    const auto bootstrapped = !enrollmentToken.empty()
+        ? initializeFromEnrollmentToken(baseUrl, enrollmentToken, deviceLabel, rootCaUrl)
+        : initializeFromCredentials(baseUrl, username, password, deviceLabel, rootCaUrl);
 
     if (bootstrapped.has_value()) {
         (void) m_enrollmentRequestStore.clear();
@@ -112,6 +119,42 @@ bool Bootstrap::ensureTrustedRoot(const std::string& baseUrl,
     }
 
     return installed || !required;
+}
+
+std::optional<BootstrapResult> Bootstrap::initializeFromEnrollmentToken(
+    const std::string& baseUrl,
+    const std::string& enrollmentToken,
+    const std::string& deviceLabel,
+    const std::string& rootCaUrl
+) const {
+    if (baseUrl.empty() || enrollmentToken.empty()) {
+        return std::nullopt;
+    }
+
+    StoredCompanionConfig config;
+    config.baseUrl = baseUrl;
+    config.rootCaUrl = rootCaUrl;
+    config.identity.deviceId = randomDeviceKey();
+    config.identity.hostname = defaultHostname();
+    config.identity.deviceLabel = deviceLabel.empty() ? defaultDeviceLabel() : deviceLabel;
+    config.identity.platform = "windows";
+    config.identity.appVersion = AIR_COMPANION_VERSION;
+
+    networking::CompanionApiClient apiClient(config.baseUrl);
+    const auto enrollment = apiClient.claimEnrollment(enrollmentToken, config.identity);
+    if (!enrollment.has_value()) {
+        return std::nullopt;
+    }
+
+    config.identity = enrollment->identity;
+    config.deviceToken = enrollment->deviceToken;
+    (void) m_configStore.save(config);
+
+    return BootstrapResult{
+        std::move(apiClient),
+        std::move(config),
+        "claimed enrollment token with AIR",
+    };
 }
 
 std::optional<BootstrapResult> Bootstrap::initializeFromCredentials(

@@ -28,6 +28,12 @@ private:
     static std::string defaultDeviceLabel();
     static std::string randomDeviceKey();
     bool ensureTrustedRoot(const std::string& baseUrl, const std::string& rootCaUrl = {}, bool required = false) const;
+    std::optional<BootstrapResult> initializeFromEnrollmentToken(
+        const std::string& baseUrl,
+        const std::string& enrollmentToken,
+        const std::string& deviceLabel,
+        const std::string& rootCaUrl
+    ) const;
     std::optional<BootstrapResult> initializeFromCredentials(
         const std::string& baseUrl,
         const std::string& username,

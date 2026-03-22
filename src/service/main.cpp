@@ -25,9 +25,8 @@ int main() {
                 (void) enrollmentRequestStore.saveTemplate();
                 host.setLastStatus("bootstrap failed; retrying");
                 std::cerr << "AIR Companion service bootstrap failed. Write enrollment details to " << requestPath
-                          << " using air_companion_tray --write-enrollment --base-url <url> --username <name> --password <password>"
-                          << " [--device-label <label>] [--root-ca-url <url>] or set AIR_COMPANION_USERNAME, AIR_COMPANION_PASSWORD,"
-                          << " and optional AIR_COMPANION_ROOT_CA_URL for first enrollment." << '\n';
+                          << " using air_companion_tray --write-enrollment --base-url <url> --enrollment-token <token>"
+                          << " [--device-label <label>] [--root-ca-url <url>] or the legacy --username/--password flow." << '\n';
                 if (host.waitForStop(15000)) {
                     break;
                 }

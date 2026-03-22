@@ -21,6 +21,9 @@ public:
         const std::string& username,
         const std::string& password,
         const models::DeviceIdentity& identity) const;
+    std::optional<models::DeviceEnrollment> claimEnrollment(
+        const std::string& enrollmentToken,
+        const models::DeviceIdentity& identity) const;
     std::optional<std::string> renewToken(const std::string& deviceToken) const;
 
     std::optional<models::DevicePolicy> fetchPolicy(const std::string& deviceToken) const;

@@ -219,7 +219,7 @@ models::DeviceCommandType parseCommandType(const std::string& type) {
 std::optional<models::DeviceEnrollment> parseEnrollmentResponse(
     const std::string& responseBody,
     const models::DeviceIdentity& identity,
-    const std::string& username
+    const std::string& fallbackUsername
 ) {
     const auto token = jsonStringValue(responseBody, "token");
     if (!token.has_value()) {
@@ -228,7 +228,7 @@ std::optional<models::DeviceEnrollment> parseEnrollmentResponse(
 
     models::DeviceEnrollment enrollment{identity, *token};
     if (const auto student = jsonObjectString(responseBody, "student"); student.has_value()) {
-        enrollment.identity.studentUsername = jsonStringValue(*student, "username").value_or(username);
+        enrollment.identity.studentUsername = jsonStringValue(*student, "username").value_or(fallbackUsername);
     }
     if (const auto device = jsonObjectString(responseBody, "device"); device.has_value()) {
         enrollment.identity.deviceLabel = jsonStringValue(*device, "label").value_or(identity.deviceLabel);

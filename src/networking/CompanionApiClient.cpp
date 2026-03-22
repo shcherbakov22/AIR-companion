@@ -197,6 +197,27 @@ std::optional<models::DeviceEnrollment> CompanionApiClient::enroll(
     return parseEnrollmentResponse(response.body, identity, username);
 }
 
+std::optional<models::DeviceEnrollment> CompanionApiClient::claimEnrollment(
+    const std::string& enrollmentToken,
+    const models::DeviceIdentity& identity) const {
+    std::ostringstream body;
+    body << "{"
+         << "\"enrollment_token\":" << jsonString(enrollmentToken) << ","
+         << "\"device_key\":" << jsonString(identity.deviceId) << ","
+         << "\"hostname\":" << jsonString(identity.hostname) << ","
+         << "\"label\":" << jsonString(identity.deviceLabel) << ","
+         << "\"platform\":" << jsonString(identity.platform) << ","
+         << "\"app_version\":" << jsonString(identity.appVersion)
+         << "}";
+
+    const auto response = m_httpClient.post(m_baseUrl + "/api/companion/enroll/claim", jsonHeaders(), body.str());
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+        return std::nullopt;
+    }
+
+    return parseEnrollmentResponse(response.body, identity);
+}
+
 std::optional<std::string> CompanionApiClient::renewToken(const std::string& deviceToken) const {
     const auto response = m_httpClient.post(
         m_baseUrl + "/api/companion/token/renew",

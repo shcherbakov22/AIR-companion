@@ -228,6 +228,7 @@ void testEnrollmentRequestStoreRoundTrip() {
     companion::service::EnrollmentRequestStore store;
     companion::service::EnrollmentRequest request{
         "https://192.168.11.228",
+        "token-123",
         "ego",
         "0",
         "codex-pc",
@@ -238,6 +239,7 @@ void testEnrollmentRequestStoreRoundTrip() {
     const auto draft = store.loadDraft();
     require(draft.has_value(), "draft load");
     requireEqual(draft->baseUrl, request.baseUrl, "draft base url");
+    requireEqual(draft->enrollmentToken, request.enrollmentToken, "draft enrollment token");
     requireEqual(draft->username, request.username, "draft username");
     requireEqual(draft->password, request.password, "draft password");
     requireEqual(draft->deviceLabel, request.deviceLabel, "draft label");
@@ -245,6 +247,7 @@ void testEnrollmentRequestStoreRoundTrip() {
 
     const auto loaded = store.load();
     require(loaded.has_value(), "request load");
+    requireEqual(loaded->enrollmentToken, request.enrollmentToken, "request enrollment token");
     requireEqual(loaded->username, request.username, "request username");
     requireEqual(loaded->rootCaUrl, request.rootCaUrl, "request root ca url");
     require(store.clear(), "request clear");

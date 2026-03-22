@@ -13,7 +13,7 @@ namespace companion::networking {
 std::optional<models::DeviceEnrollment> parseEnrollmentResponse(
     const std::string& responseBody,
     const models::DeviceIdentity& identity,
-    const std::string& username
+    const std::string& fallbackUsername = {}
 );
 
 std::optional<std::string> parseRenewTokenResponse(const std::string& responseBody);
