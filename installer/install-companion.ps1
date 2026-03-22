@@ -10,6 +10,11 @@ $serviceBinary = Join-Path $bundleDirectory 'air_companion_service.exe'
 $utilityBinary = Join-Path $bundleDirectory 'air_companion_tray.exe'
 $updaterBinary = Join-Path $bundleDirectory 'air_companion_updater.exe'
 $serviceName = 'AIRCompanion'
+$logDirectory = Join-Path $env:ProgramData 'AIRCompanion\Logs'
+$logPath = Join-Path $logDirectory 'install.log'
+
+New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
+Start-Transcript -Path $logPath -Append | Out-Null
 
 foreach ($path in @($serviceBinary, $utilityBinary, $updaterBinary)) {
     if (-not (Test-Path $path)) {
@@ -33,18 +38,36 @@ $installedServiceBinary = Join-Path $InstallDirectory 'air_companion_service.exe
 $serviceExists = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($null -eq $serviceExists) {
     sc.exe create $serviceName binPath= "\"$installedServiceBinary\"" start= auto DisplayName= "\"AIR Companion\"" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create AIR Companion service."
+    }
 } else {
     sc.exe config $serviceName binPath= "\"$installedServiceBinary\"" start= auto DisplayName= "\"AIR Companion\"" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to update AIR Companion service."
+    }
 }
 
 sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/30000 | Out-Null
 reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\$serviceName" /v DelayedAutostart /t REG_DWORD /d 1 /f | Out-Null
 
-try {
-    Start-Service -Name $serviceName -ErrorAction Stop | Out-Null
-} catch {
+Start-Service -Name $serviceName -ErrorAction SilentlyContinue | Out-Null
+if ((Get-Service -Name $serviceName).Status -ne 'Running') {
+    sc.exe start $serviceName | Out-Null
 }
 
-Start-Process $EnrollmentUrl | Out-Null
-Write-Host "AIR Companion installed to $InstallDirectory"
-Write-Host "Opened enrollment page: $EnrollmentUrl"
+for ($attempt = 0; $attempt -lt 15; $attempt++) {
+    $service = Get-Service -Name $serviceName -ErrorAction Stop
+    if ($service.Status -eq 'Running') {
+        Start-Process $EnrollmentUrl | Out-Null
+        Write-Host "AIR Companion installed to $InstallDirectory"
+        Write-Host "Opened enrollment page: $EnrollmentUrl"
+        Write-Host "Install log: $logPath"
+        Stop-Transcript | Out-Null
+        exit 0
+    }
+
+    Start-Sleep -Seconds 1
+}
+
+throw "AIR Companion service failed to start. See $logPath"
