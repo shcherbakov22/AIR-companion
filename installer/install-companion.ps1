@@ -65,7 +65,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 try {
-    & $ScriptPath -InstallDirectory $InstallDirectory -EnrollmentUrl $EnrollmentUrl
+    & "$ScriptPath" -InstallDirectory $InstallDirectory -EnrollmentUrl $EnrollmentUrl
     $exitCode = if ($LASTEXITCODE -ne $null) { $LASTEXITCODE } else { 0 }
     if ($exitCode -ne 0 -and -not (Test-Path $ResultPath)) {
         Set-Content -Path $ResultPath -Value "Elevated installer exited with code $exitCode."
@@ -77,15 +77,8 @@ try {
 }
 '@ | Set-Content -Path $elevatedWrapperPath
 
-    $argumentList = @(
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', $elevatedWrapperPath,
-        '-ScriptPath', $PSCommandPath,
-        '-ResultPath', $resultPath,
-        '-InstallDirectory', $InstallDirectory,
-        '-EnrollmentUrl', $EnrollmentUrl
-    )
+    $argumentList = ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -ScriptPath "{1}" -ResultPath "{2}" -InstallDirectory "{3}" -EnrollmentUrl "{4}"' -f `
+        $elevatedWrapperPath, $PSCommandPath, $resultPath, $InstallDirectory, $EnrollmentUrl)
     $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argumentList -PassThru -Wait
     if ($process.ExitCode -ne 0) {
         $childMessage = if (Test-Path $resultPath) {
