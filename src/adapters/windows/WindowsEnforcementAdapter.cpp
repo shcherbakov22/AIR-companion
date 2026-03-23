@@ -18,11 +18,29 @@ std::string normalizeProcessName(std::string value) {
     return value;
 }
 
+bool isProtectedProcessName(const std::string& processName) {
+    static const std::unordered_set<std::string> protectedNames = {
+        "explorer.exe",
+        "rundll32.exe",
+        "shellexperiencehost.exe",
+        "startmenuexperiencehost.exe",
+        "searchhost.exe",
+        "searchapp.exe",
+        "dwm.exe",
+        "taskmgr.exe",
+    };
+
+    return protectedNames.find(processName) != protectedNames.end();
+}
+
 std::unordered_set<std::string> normalizedBlockedApps(const std::vector<std::string>& blockedApps) {
     std::unordered_set<std::string> names;
     for (const auto& blockedApp : blockedApps) {
         if (!blockedApp.empty()) {
-            names.insert(normalizeProcessName(blockedApp));
+            const auto normalized = normalizeProcessName(blockedApp);
+            if (!isProtectedProcessName(normalized)) {
+                names.insert(normalized);
+            }
         }
     }
     return names;
@@ -49,6 +67,10 @@ void terminateProcessesByName(const std::unordered_set<std::string>& blockedApps
     do {
         const auto name = normalizeProcessName(processEntry.szExeFile);
         if (blockedApps.find(name) == blockedApps.end()) {
+            continue;
+        }
+
+        if (isProtectedProcessName(name)) {
             continue;
         }
 
