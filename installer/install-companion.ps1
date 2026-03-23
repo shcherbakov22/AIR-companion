@@ -6,6 +6,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $logDirectory = Join-Path $env:ProgramData 'AIRCompanion\Logs'
 $logPath = Join-Path $logDirectory 'install.log'
+$resultPath = Join-Path $logDirectory 'install-result.txt'
+$elevatedWrapperPath = Join-Path $logDirectory 'install-elevated.ps1'
 
 function Show-FailureAndPause {
     param(
@@ -47,16 +49,52 @@ try {
     $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
+    if (Test-Path $resultPath) {
+        Remove-Item -Force $resultPath
+    }
+
+    @'
+param(
+    [string]$ScriptPath,
+    [string]$ResultPath,
+    [string]$InstallDirectory,
+    [string]$EnrollmentUrl
+)
+
+$ErrorActionPreference = 'Stop'
+
+try {
+    & $ScriptPath -InstallDirectory $InstallDirectory -EnrollmentUrl $EnrollmentUrl
+    $exitCode = if ($LASTEXITCODE -ne $null) { $LASTEXITCODE } else { 0 }
+    if ($exitCode -ne 0 -and -not (Test-Path $ResultPath)) {
+        Set-Content -Path $ResultPath -Value "Elevated installer exited with code $exitCode."
+    }
+    exit $exitCode
+} catch {
+    Set-Content -Path $ResultPath -Value $_.Exception.Message
+    exit 1
+}
+'@ | Set-Content -Path $elevatedWrapperPath
+
     $argumentList = @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
-        '-File', $PSCommandPath,
+        '-File', $elevatedWrapperPath,
+        '-ScriptPath', $PSCommandPath,
+        '-ResultPath', $resultPath,
         '-InstallDirectory', $InstallDirectory,
         '-EnrollmentUrl', $EnrollmentUrl
     )
     $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argumentList -PassThru -Wait
     if ($process.ExitCode -ne 0) {
-        Show-FailureAndPause -Message "Elevated installer exited with code $($process.ExitCode)." -LogPath $logPath
+        $childMessage = if (Test-Path $resultPath) {
+            Get-Content $resultPath -Raw
+        } else {
+            "Elevated installer exited with code $($process.ExitCode)."
+        }
+
+        Show-FailureAndPause -Message $childMessage.Trim() -LogPath $logPath
     }
         exit $process.ExitCode
     }
