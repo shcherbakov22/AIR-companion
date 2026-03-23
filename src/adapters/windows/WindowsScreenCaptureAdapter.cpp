@@ -218,9 +218,11 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionH
     std::filesystem::create_directories(outputDirectory);
     const auto stagingDirectory = sharedInteractiveCaptureDirectory();
     std::filesystem::create_directories(stagingDirectory);
-    const auto outputPath = stagingDirectory / "screen-capture.png";
+    const auto stagingPath = stagingDirectory / "screen-capture.png";
+    const auto finalPath = std::filesystem::path(outputDirectory) / "screen-capture.png";
     std::error_code errorCode;
-    std::filesystem::remove(outputPath, errorCode);
+    std::filesystem::remove(stagingPath, errorCode);
+    std::filesystem::remove(finalPath, errorCode);
 
     const auto helperPath = trayBinaryPath();
     if (helperPath.empty() || !std::filesystem::exists(helperPath)) {
@@ -254,7 +256,7 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionH
     std::wstring commandLine = L"\"";
     commandLine += helperPath;
     commandLine += L"\" --capture-screen-once \"";
-    commandLine += utf8ToWide(outputDirectory);
+    commandLine += stagingDirectory.wstring();
     commandLine += L"\"";
 
     const auto created = CreateProcessAsUserW(
@@ -282,12 +284,22 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionH
     }
 
     WaitForSingleObject(processInformation.hProcess, 15000);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(processInformation.hProcess, &exitCode);
     CloseHandle(processInformation.hThread);
     CloseHandle(processInformation.hProcess);
 
+    if (exitCode != 0) {
+        return std::nullopt;
+    }
+
     for (int attempt = 0; attempt < 30; ++attempt) {
-        if (std::filesystem::exists(outputPath)) {
-            return wideToUtf8(outputPath.wstring());
+        if (std::filesystem::exists(stagingPath)) {
+            std::filesystem::copy_file(stagingPath, finalPath, std::filesystem::copy_options::overwrite_existing, errorCode);
+            if (errorCode) {
+                return std::nullopt;
+            }
+            return wideToUtf8(finalPath.wstring());
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
