@@ -15,6 +15,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <thread>
 #include <vector>
 
@@ -22,6 +23,28 @@ namespace companion::adapters::windows {
 
 #ifdef _WIN32
 namespace {
+
+void appendDebugLog(const std::string& line) {
+#ifdef _WIN32
+    const char* appData = std::getenv("APPDATA");
+    if (appData == nullptr || *appData == '\0') {
+        return;
+    }
+
+    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
+    std::error_code errorCode;
+    std::filesystem::create_directories(logDirectory, errorCode);
+
+    std::ofstream output(logDirectory / "debug.log", std::ios::app);
+    if (!output.is_open()) {
+        return;
+    }
+
+    output << line << '\n';
+#else
+    (void) line;
+#endif
+}
 
 class GdiPlusSession {
 public:
@@ -142,9 +165,11 @@ bool sameSessionAsActiveConsole() {
 std::optional<std::string> WindowsScreenCaptureAdapter::captureToFile(const std::string& outputDirectory) {
 #ifdef _WIN32
     if (sameSessionAsActiveConsole()) {
+        appendDebugLog("screen capture using interactive path output=" + outputDirectory);
         return captureInteractive(outputDirectory);
     }
 
+    appendDebugLog("screen capture using active-session helper output=" + outputDirectory);
     return captureViaActiveSessionHelper(outputDirectory);
 #else
     (void) outputDirectory;
@@ -164,6 +189,7 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureInteractive(const
     const int screenHeight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
 
     if (screenWidth <= 0 || screenHeight <= 0) {
+        appendDebugLog("screen capture interactive invalid virtual screen metrics");
         return std::nullopt;
     }
 
@@ -172,17 +198,20 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureInteractive(const
 
     HDC screenDc = GetDC(nullptr);
     if (!screenDc) {
+        appendDebugLog("screen capture interactive GetDC failed");
         return std::nullopt;
     }
 
     HDC memoryDc = CreateCompatibleDC(screenDc);
     if (!memoryDc) {
+        appendDebugLog("screen capture interactive CreateCompatibleDC failed");
         ReleaseDC(nullptr, screenDc);
         return std::nullopt;
     }
 
     HBITMAP bitmap = CreateCompatibleBitmap(screenDc, screenWidth, screenHeight);
     if (!bitmap) {
+        appendDebugLog("screen capture interactive CreateCompatibleBitmap failed");
         DeleteDC(memoryDc);
         ReleaseDC(nullptr, screenDc);
         return std::nullopt;
@@ -199,8 +228,15 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureInteractive(const
             Gdiplus::Bitmap image(bitmap, nullptr);
             if (image.Save(widePath.c_str(), &encoder, nullptr) == Gdiplus::Ok) {
                 result = path;
+                appendDebugLog("screen capture interactive saved path=" + path);
+            } else {
+                appendDebugLog("screen capture interactive GDI+ save failed path=" + path);
             }
+        } else {
+            appendDebugLog("screen capture interactive png encoder lookup failed");
         }
+    } else {
+        appendDebugLog("screen capture interactive BitBlt failed");
     }
 
     DeleteObject(bitmap);
@@ -221,24 +257,30 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionH
     const auto stagingPath = stagingDirectory / "screen-capture.png";
     std::error_code errorCode;
     std::filesystem::remove(stagingPath, errorCode);
+    appendDebugLog("screen capture helper staging=" + wideToUtf8(stagingPath.wstring()));
 
     const auto helperPath = trayBinaryPath();
     if (helperPath.empty() || !std::filesystem::exists(helperPath)) {
+        appendDebugLog("screen capture helper binary missing");
         return std::nullopt;
     }
 
     const auto activeSessionId = WTSGetActiveConsoleSessionId();
     if (activeSessionId == 0xFFFFFFFF) {
+        appendDebugLog("screen capture helper no active console session");
         return std::nullopt;
     }
+    appendDebugLog("screen capture helper activeSessionId=" + std::to_string(activeSessionId));
 
     HANDLE userToken = nullptr;
     if (!WTSQueryUserToken(activeSessionId, &userToken)) {
+        appendDebugLog("screen capture helper WTSQueryUserToken failed error=" + std::to_string(GetLastError()));
         return std::nullopt;
     }
 
     HANDLE primaryToken = nullptr;
     if (!DuplicateTokenEx(userToken, TOKEN_ALL_ACCESS, nullptr, SecurityImpersonation, TokenPrimary, &primaryToken)) {
+        appendDebugLog("screen capture helper DuplicateTokenEx failed error=" + std::to_string(GetLastError()));
         CloseHandle(userToken);
         return std::nullopt;
     }
@@ -278,12 +320,15 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionH
     CloseHandle(userToken);
 
     if (!created) {
+        appendDebugLog("screen capture helper CreateProcessAsUserW failed error=" + std::to_string(GetLastError()));
         return std::nullopt;
     }
+    appendDebugLog("screen capture helper created process");
 
     WaitForSingleObject(processInformation.hProcess, 15000);
     DWORD exitCode = 1;
     GetExitCodeProcess(processInformation.hProcess, &exitCode);
+    appendDebugLog("screen capture helper exitCode=" + std::to_string(exitCode));
     CloseHandle(processInformation.hThread);
     CloseHandle(processInformation.hProcess);
 
@@ -293,11 +338,13 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionH
 
     for (int attempt = 0; attempt < 30; ++attempt) {
         if (std::filesystem::exists(stagingPath)) {
+            appendDebugLog("screen capture helper staged file ready");
             return wideToUtf8(stagingPath.wstring());
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
 
+    appendDebugLog("screen capture helper staged file missing after wait");
     return std::nullopt;
 #else
     (void) outputDirectory;
