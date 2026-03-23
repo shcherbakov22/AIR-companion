@@ -46,6 +46,32 @@ function Update-ServiceConfiguration {
     }
 }
 
+function Ensure-ServiceWatchdogTasks {
+    param(
+        [string]$ServiceName
+    )
+
+    $taskDefinitions = @(
+        @{
+            Name = 'AIR Companion Service (Boot)'
+            Schedule = '/SC ONSTART'
+        },
+        @{
+            Name = 'AIR Companion Service (Logon)'
+            Schedule = '/SC ONLOGON'
+        }
+    )
+
+    foreach ($task in $taskDefinitions) {
+        $command = 'schtasks.exe /Create /TN "{0}" {1} /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c sc start {2}" /F' -f `
+            $task.Name, $task.Schedule, $ServiceName
+        $null = cmd.exe /c $command
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create watchdog task '$($task.Name)'."
+        }
+    }
+}
+
 try {
     $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
@@ -130,6 +156,7 @@ try {
 
     sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/30000 | Out-Null
     reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\$serviceName" /v DelayedAutostart /t REG_DWORD /d 1 /f | Out-Null
+    Ensure-ServiceWatchdogTasks -ServiceName $serviceName
 
     Start-Service -Name $serviceName -ErrorAction SilentlyContinue | Out-Null
     if ((Get-Service -Name $serviceName).Status -ne 'Running') {
