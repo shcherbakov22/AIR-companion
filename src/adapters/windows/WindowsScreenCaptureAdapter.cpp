@@ -215,14 +215,12 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureInteractive(const
 
 std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionHelper(const std::string& outputDirectory) const {
 #ifdef _WIN32
-    std::filesystem::create_directories(outputDirectory);
+    (void) outputDirectory;
     const auto stagingDirectory = sharedInteractiveCaptureDirectory();
     std::filesystem::create_directories(stagingDirectory);
     const auto stagingPath = stagingDirectory / "screen-capture.png";
-    const auto finalPath = std::filesystem::path(outputDirectory) / "screen-capture.png";
     std::error_code errorCode;
     std::filesystem::remove(stagingPath, errorCode);
-    std::filesystem::remove(finalPath, errorCode);
 
     const auto helperPath = trayBinaryPath();
     if (helperPath.empty() || !std::filesystem::exists(helperPath)) {
@@ -295,11 +293,7 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionH
 
     for (int attempt = 0; attempt < 30; ++attempt) {
         if (std::filesystem::exists(stagingPath)) {
-            std::filesystem::copy_file(stagingPath, finalPath, std::filesystem::copy_options::overwrite_existing, errorCode);
-            if (errorCode) {
-                return std::nullopt;
-            }
-            return wideToUtf8(finalPath.wstring());
+            return wideToUtf8(stagingPath.wstring());
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
