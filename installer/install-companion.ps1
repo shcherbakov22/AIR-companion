@@ -5,6 +5,19 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    $argumentList = @(
+        '-ExecutionPolicy', 'Bypass',
+        '-File', ('"{0}"' -f $PSCommandPath),
+        '-InstallDirectory', ('"{0}"' -f $InstallDirectory),
+        '-EnrollmentUrl', ('"{0}"' -f $EnrollmentUrl)
+    )
+    Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argumentList | Out-Null
+    exit 0
+}
+
 $bundleDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $serviceBinary = Join-Path $bundleDirectory 'air_companion_service.exe'
 $utilityBinary = Join-Path $bundleDirectory 'air_companion_tray.exe'
