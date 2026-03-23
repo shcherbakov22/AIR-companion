@@ -395,6 +395,14 @@ bool CompanionApiClient::uploadScreenCapture(const std::string& deviceToken,
         filePath,
         contentType
     );
+    std::error_code errorCode;
+    const auto fileSize = std::filesystem::file_size(filePath, errorCode);
+    appendDebugLog(
+        "uploadScreenCapture path=" + filePath
+        + " size=" + std::to_string(errorCode ? 0 : fileSize)
+        + " status=" + std::to_string(response.statusCode)
+        + " body=" + response.body
+    );
     return response.statusCode >= 200 && response.statusCode < 300;
 }
 
@@ -415,6 +423,14 @@ bool CompanionApiClient::uploadCameraCapture(const std::string& deviceToken,
         "capture",
         filePath,
         contentType
+    );
+    std::error_code errorCode;
+    const auto fileSize = std::filesystem::file_size(filePath, errorCode);
+    appendDebugLog(
+        "uploadCameraCapture path=" + filePath
+        + " size=" + std::to_string(errorCode ? 0 : fileSize)
+        + " status=" + std::to_string(response.statusCode)
+        + " body=" + response.body
     );
     return response.statusCode >= 200 && response.statusCode < 300;
 }
