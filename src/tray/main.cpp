@@ -84,8 +84,8 @@ int main(int argc, char* argv[]) {
         companion::service::EnrollmentRequest request{
             .baseUrl = baseUrl,
             .enrollmentToken = enrollmentToken != nullptr ? enrollmentToken : std::string{},
-            .username = username,
-            .password = password,
+            .username = username != nullptr ? username : std::string{},
+            .password = password != nullptr ? password : std::string{},
             .deviceLabel = argumentValue(argc, argv, "--device-label") != nullptr
                 ? argumentValue(argc, argv, "--device-label")
                 : std::string{},
@@ -94,7 +94,8 @@ int main(int argc, char* argv[]) {
                 : std::string{},
         };
 
-        if (!enrollmentRequestStore.save(request)) {
+        if (const auto error = enrollmentRequestStore.saveWithError(request); error.has_value()) {
+            std::cerr << error.value() << '\n';
             return 1;
         }
 

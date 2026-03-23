@@ -19,6 +19,7 @@ public:
     std::optional<EnrollmentRequest> loadDraft() const;
     std::optional<EnrollmentRequest> load() const;
     bool save(const EnrollmentRequest& request) const;
+    std::optional<std::string> saveWithError(const EnrollmentRequest& request) const;
     bool saveTemplate() const;
     bool clear() const;
     std::string requestPath() const;

@@ -132,18 +132,22 @@ std::optional<EnrollmentRequest> EnrollmentRequestStore::load() const {
 }
 
 bool EnrollmentRequestStore::save(const EnrollmentRequest& request) const {
+    return !saveWithError(request).has_value();
+}
+
+std::optional<std::string> EnrollmentRequestStore::saveWithError(const EnrollmentRequest& request) const {
     const auto directory = requestDirectory();
     std::error_code error;
     std::filesystem::create_directories(directory, error);
     if (error) {
-        return false;
+        return "Failed to create enrollment directory '" + directory + "': " + error.message();
     }
 
     hidePath(directory);
 
     std::ofstream output(requestPath(), std::ios::binary | std::ios::trunc);
     if (!output.is_open()) {
-        return false;
+        return "Failed to open enrollment request file '" + requestPath() + "' for writing.";
     }
 
     output
@@ -158,7 +162,11 @@ bool EnrollmentRequestStore::save(const EnrollmentRequest& request) const {
 
     output.flush();
     hidePath(requestPath());
-    return output.good();
+    if (!output.good()) {
+        return "Failed to flush enrollment request file '" + requestPath() + "'.";
+    }
+
+    return std::nullopt;
 }
 
 bool EnrollmentRequestStore::saveTemplate() const {
