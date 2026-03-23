@@ -106,6 +106,55 @@ void normalizeWritablePath(const std::string& path) {
 #endif
 }
 
+enum class PathKind {
+    Missing,
+    File,
+    Directory,
+};
+
+std::optional<std::string> pathKind(const std::string& path, PathKind& kind) {
+#ifdef _WIN32
+    const auto wideLength = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+    if (wideLength <= 0) {
+        return "Failed to inspect enrollment request path '" + path + "': invalid UTF-8 path.";
+    }
+
+    std::wstring wide(static_cast<std::size_t>(wideLength), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, wide.data(), wideLength);
+    const auto attributes = GetFileAttributesW(wide.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const auto lastError = GetLastError();
+        if (lastError == ERROR_FILE_NOT_FOUND || lastError == ERROR_PATH_NOT_FOUND) {
+            kind = PathKind::Missing;
+            return std::nullopt;
+        }
+
+        return "Failed to inspect enrollment request path '" + path + "': Win32 error " + std::to_string(lastError) + ".";
+    }
+
+    kind = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? PathKind::Directory : PathKind::File;
+    return std::nullopt;
+#else
+    std::error_code error;
+    const auto exists = std::filesystem::exists(path, error);
+    if (error) {
+        return "Failed to inspect enrollment request path '" + path + "': " + error.message();
+    }
+
+    if (!exists) {
+        kind = PathKind::Missing;
+        return std::nullopt;
+    }
+
+    kind = std::filesystem::is_directory(path, error) ? PathKind::Directory : PathKind::File;
+    if (error) {
+        return "Failed to inspect enrollment request path '" + path + "': " + error.message();
+    }
+
+    return std::nullopt;
+#endif
+}
+
 }  // namespace
 
 std::optional<EnrollmentRequest> EnrollmentRequestStore::loadDraft() const {
@@ -160,19 +209,12 @@ std::optional<std::string> EnrollmentRequestStore::saveWithError(const Enrollmen
         return "Failed to create enrollment directory '" + directory + "': " + error.message();
     }
 
-    error.clear();
-    const auto pathExists = std::filesystem::exists(path, error);
-    if (error) {
-        return "Failed to inspect enrollment request path '" + path + "': " + error.message();
+    PathKind existingPathKind = PathKind::Missing;
+    if (const auto inspectionError = pathKind(path, existingPathKind); inspectionError.has_value()) {
+        return inspectionError;
     }
 
-    error.clear();
-    const auto pathIsDirectory = std::filesystem::is_directory(path, error);
-    if (error) {
-        return "Failed to inspect enrollment request path '" + path + "': " + error.message();
-    }
-
-    if (pathExists && pathIsDirectory) {
+    if (existingPathKind == PathKind::Directory) {
         error.clear();
         std::filesystem::remove_all(path, error);
         if (error) {
