@@ -12,7 +12,32 @@
 #include "companion/service/UpdateCoordinator.h"
 
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+
+namespace {
+
+void appendBootstrapLog(const std::string& line) {
+    const char* appData = std::getenv("APPDATA");
+    if (appData == nullptr || *appData == '\0') {
+        return;
+    }
+
+    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
+    std::error_code errorCode;
+    std::filesystem::create_directories(logDirectory, errorCode);
+
+    std::ofstream output(logDirectory / "debug.log", std::ios::app);
+    if (!output.is_open()) {
+        return;
+    }
+
+    output << line << '\n';
+}
+
+}
 
 int main() {
     companion::service::ServiceHost serviceHost([](companion::service::ServiceHost& host) {
@@ -24,6 +49,7 @@ int main() {
                 const auto requestPath = enrollmentRequestStore.requestPath();
                 (void) enrollmentRequestStore.saveTemplate();
                 host.setLastStatus("bootstrap failed; retrying");
+                appendBootstrapLog("bootstrap failed; waiting for enrollment request at " + requestPath);
                 std::cerr << "AIR Companion service bootstrap failed. Write enrollment details to " << requestPath
                           << " using air_companion_tray --write-enrollment --base-url <url> --enrollment-token <token>"
                           << " [--device-label <label>] [--root-ca-url <url>] or the legacy --username/--password flow." << '\n';
@@ -86,9 +112,11 @@ int main() {
             } catch (const std::exception& exception) {
                 std::cerr << "AIR Companion agent loop exception: " << exception.what() << '\n';
                 host.setLastStatus(std::string("agent error: ") + exception.what());
+                appendBootstrapLog(std::string("agent error: ") + exception.what());
             } catch (...) {
                 std::cerr << "AIR Companion agent loop exception: unknown\n";
                 host.setLastStatus("agent error: unknown");
+                appendBootstrapLog("agent error: unknown");
             }
 
             agent.stop();

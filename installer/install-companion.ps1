@@ -14,8 +14,8 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
         '-InstallDirectory', ('"{0}"' -f $InstallDirectory),
         '-EnrollmentUrl', ('"{0}"' -f $EnrollmentUrl)
     )
-    Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argumentList | Out-Null
-    exit 0
+    $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argumentList -PassThru -Wait
+    exit $process.ExitCode
 }
 
 $bundleDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
