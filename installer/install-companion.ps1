@@ -50,10 +50,7 @@ Copy-Item -Path $updaterBinary -Destination (Join-Path $InstallDirectory 'air_co
 $installedServiceBinary = Join-Path $InstallDirectory 'air_companion_service.exe'
 $serviceExists = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($null -eq $serviceExists) {
-    sc.exe create $serviceName binPath= "\"$installedServiceBinary\"" start= auto DisplayName= "\"AIR Companion\"" | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to create AIR Companion service."
-    }
+    New-Service -Name $serviceName -BinaryPathName $installedServiceBinary -DisplayName 'AIR Companion' -StartupType Automatic | Out-Null
 } else {
     sc.exe config $serviceName binPath= "\"$installedServiceBinary\"" start= auto DisplayName= "\"AIR Companion\"" | Out-Null
     if ($LASTEXITCODE -ne 0) {
