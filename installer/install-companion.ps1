@@ -23,6 +23,26 @@ function Show-FailureAndPause {
     Read-Host 'Press Enter to close'
 }
 
+function Update-ServiceConfiguration {
+    param(
+        [string]$ServiceName,
+        [string]$BinaryPath
+    )
+
+    $quotedBinaryPath = '"' + $BinaryPath + '"'
+    $serviceInstance = Get-CimInstance -ClassName Win32_Service -Filter "Name='$ServiceName'" -ErrorAction Stop
+    $changeResult = Invoke-CimMethod -InputObject $serviceInstance -MethodName Change -Arguments @{
+        PathName = $quotedBinaryPath
+        StartMode = 'Automatic'
+        DisplayName = 'AIR Companion'
+    } -ErrorAction Stop
+
+    if ($null -eq $changeResult -or $changeResult.ReturnValue -ne 0) {
+        $returnValue = if ($null -eq $changeResult) { 'unknown' } else { $changeResult.ReturnValue }
+        throw "Failed to update AIR Companion service. Win32_Service.Change returned $returnValue."
+    }
+}
+
 try {
     $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
@@ -73,10 +93,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     if ($null -eq $serviceExists) {
         New-Service -Name $serviceName -BinaryPathName $installedServiceBinary -DisplayName 'AIR Companion' -StartupType Automatic | Out-Null
     } else {
-        sc.exe config $serviceName binPath= "\"$installedServiceBinary\"" start= auto DisplayName= "\"AIR Companion\"" | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to update AIR Companion service."
-        }
+        Update-ServiceConfiguration -ServiceName $serviceName -BinaryPath $installedServiceBinary
     }
 
     sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/30000 | Out-Null
