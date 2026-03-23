@@ -6,8 +6,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $logDirectory = Join-Path $env:ProgramData 'AIRCompanion\Logs'
 $logPath = Join-Path $logDirectory 'install.log'
-$resultPath = Join-Path $logDirectory 'install-result.txt'
-$elevatedWrapperPath = Join-Path $logDirectory 'install-elevated.ps1'
+$bootstrapDirectory = Join-Path ([System.IO.Path]::GetTempPath()) 'AIRCompanion'
+$resultPath = Join-Path $bootstrapDirectory 'install-result.txt'
+$elevatedWrapperPath = Join-Path $bootstrapDirectory 'install-elevated.ps1'
 
 function Show-FailureAndPause {
     param(
@@ -49,7 +50,7 @@ try {
     $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
+    New-Item -ItemType Directory -Force -Path $bootstrapDirectory | Out-Null
     if (Test-Path $resultPath) {
         Remove-Item -Force $resultPath
     }
