@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $presetDirectory = if ($Configuration -eq 'Release') { 'windows-release' } else { 'windows-debug' }
 $sourceDirectory = Join-Path $repoRoot "build\\$presetDirectory\\$Configuration"
-$bundleDirectory = Join-Path $repoRoot "dist\\air-companion-windows-installer-0.1.1"
+$bundleDirectory = Join-Path $repoRoot "dist\\air-companion-windows-installer-0.1.2"
 $bundleZip = "$bundleDirectory.zip"
 
 foreach ($requiredFile in @('air_companion_service.exe', 'air_companion_tray.exe', 'air_companion_updater.exe')) {
