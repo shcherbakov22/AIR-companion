@@ -91,6 +91,21 @@ void hidePath(const std::string& path) {
 #endif
 }
 
+void normalizeWritablePath(const std::string& path) {
+#ifdef _WIN32
+    const auto wideLength = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+    if (wideLength <= 0) {
+        return;
+    }
+
+    std::wstring wide(static_cast<std::size_t>(wideLength), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, wide.data(), wideLength);
+    SetFileAttributesW(wide.c_str(), FILE_ATTRIBUTE_NORMAL);
+#else
+    (void) path;
+#endif
+}
+
 }  // namespace
 
 std::optional<EnrollmentRequest> EnrollmentRequestStore::loadDraft() const {
@@ -137,17 +152,41 @@ bool EnrollmentRequestStore::save(const EnrollmentRequest& request) const {
 
 std::optional<std::string> EnrollmentRequestStore::saveWithError(const EnrollmentRequest& request) const {
     const auto directory = requestDirectory();
+    const auto path = requestPath();
+    const auto tempPath = path + ".tmp";
     std::error_code error;
     std::filesystem::create_directories(directory, error);
     if (error) {
         return "Failed to create enrollment directory '" + directory + "': " + error.message();
     }
 
+    error.clear();
+    const auto pathExists = std::filesystem::exists(path, error);
+    if (error) {
+        return "Failed to inspect enrollment request path '" + path + "': " + error.message();
+    }
+
+    error.clear();
+    const auto pathIsDirectory = std::filesystem::is_directory(path, error);
+    if (error) {
+        return "Failed to inspect enrollment request path '" + path + "': " + error.message();
+    }
+
+    if (pathExists && pathIsDirectory) {
+        error.clear();
+        std::filesystem::remove_all(path, error);
+        if (error) {
+            return "Failed to remove malformed enrollment request directory '" + path + "': " + error.message();
+        }
+    }
+
+    normalizeWritablePath(path);
+    normalizeWritablePath(tempPath);
     hidePath(directory);
 
-    std::ofstream output(requestPath(), std::ios::binary | std::ios::trunc);
+    std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
     if (!output.is_open()) {
-        return "Failed to open enrollment request file '" + requestPath() + "' for writing.";
+        return "Failed to open enrollment request file '" + path + "' for writing.";
     }
 
     output
@@ -161,10 +200,26 @@ std::optional<std::string> EnrollmentRequestStore::saveWithError(const Enrollmen
         << "}\n";
 
     output.flush();
-    hidePath(requestPath());
     if (!output.good()) {
-        return "Failed to flush enrollment request file '" + requestPath() + "'.";
+        return "Failed to flush enrollment request file '" + path + "'.";
     }
+
+    output.close();
+    if (!output.good()) {
+        return "Failed to close enrollment request file '" + path + "'.";
+    }
+
+    std::filesystem::rename(tempPath, path, error);
+    if (error) {
+        std::filesystem::remove(path, error);
+        error.clear();
+        std::filesystem::rename(tempPath, path, error);
+        if (error) {
+            return "Failed to replace enrollment request file '" + path + "': " + error.message();
+        }
+    }
+
+    hidePath(path);
 
     return std::nullopt;
 }
