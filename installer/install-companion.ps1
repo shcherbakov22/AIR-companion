@@ -26,17 +26,18 @@ function Show-FailureAndPause {
 try {
     $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        $argumentList = @(
-            '-ExecutionPolicy', 'Bypass',
-            '-File', ('"{0}"' -f $PSCommandPath),
-            '-InstallDirectory', ('"{0}"' -f $InstallDirectory),
-            '-EnrollmentUrl', ('"{0}"' -f $EnrollmentUrl)
-        )
-        $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argumentList -PassThru -Wait
-        if ($process.ExitCode -ne 0) {
-            Show-FailureAndPause -Message "Elevated installer exited with code $($process.ExitCode)." -LogPath $logPath
-        }
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    $argumentList = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $PSCommandPath,
+        '-InstallDirectory', $InstallDirectory,
+        '-EnrollmentUrl', $EnrollmentUrl
+    )
+    $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argumentList -PassThru -Wait
+    if ($process.ExitCode -ne 0) {
+        Show-FailureAndPause -Message "Elevated installer exited with code $($process.ExitCode)." -LogPath $logPath
+    }
         exit $process.ExitCode
     }
 
