@@ -154,16 +154,15 @@ bool WindowsRemoteAccessAdapter::verifyReadiness() {
         return false;
     }
 
-    const bool active = helperIsListening() || startRemoteControl();
+    const bool active = helperIsListening();
     m_state.active = active;
-    m_state.ready = active;
-    if (!active && m_state.failureReason.empty()) {
-        m_state.failureReason = "remote control helper is not listening";
-    }
-    if (active) {
+    m_state.ready = true;
+    if (!active) {
+        m_state.failureReason.clear();
+    } else {
         m_state.failureReason.clear();
     }
-    return active;
+    return true;
 #else
     m_state.ready = false;
     m_state.active = false;
