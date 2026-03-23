@@ -118,6 +118,14 @@ std::wstring trayBinaryPath() {
     return path;
 }
 
+std::filesystem::path sharedInteractiveCaptureDirectory() {
+    if (const auto* publicRoot = std::getenv("PUBLIC"); publicRoot != nullptr && *publicRoot != '\0') {
+        return std::filesystem::path(publicRoot) / "AIRCompanion" / "InteractiveCapture";
+    }
+
+    return std::filesystem::path("C:\\Users\\Public\\AIRCompanion\\InteractiveCapture");
+}
+
 bool sameSessionAsActiveConsole() {
     DWORD processSessionId = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &processSessionId)) {
@@ -208,7 +216,9 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureInteractive(const
 std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionHelper(const std::string& outputDirectory) const {
 #ifdef _WIN32
     std::filesystem::create_directories(outputDirectory);
-    const auto outputPath = std::filesystem::path(outputDirectory) / "screen-capture.png";
+    const auto stagingDirectory = sharedInteractiveCaptureDirectory();
+    std::filesystem::create_directories(stagingDirectory);
+    const auto outputPath = stagingDirectory / "screen-capture.png";
     std::error_code errorCode;
     std::filesystem::remove(outputPath, errorCode);
 
