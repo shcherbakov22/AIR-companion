@@ -137,17 +137,31 @@ void Agent::tick() {
         switch (command.type) {
             case models::DeviceCommandType::RequestScreenshot: {
                 const auto path = m_screenCaptureAdapter.captureToFile(m_captureScheduler.settings().screenOutputDirectory);
-                success = path.has_value()
-                    && m_uplinkSync.uploadScreenCapture(*path, snapshot, m_captureScheduler.settings().screenContentType);
-                output = success ? "screen capture uploaded" : "screen capture failed";
+                if (!path.has_value()) {
+                    success = false;
+                    output = "screen capture create failed";
+                } else if (!m_uplinkSync.uploadScreenCapture(*path, snapshot, m_captureScheduler.settings().screenContentType)) {
+                    success = false;
+                    output = "screen capture upload failed";
+                } else {
+                    success = true;
+                    output = "screen capture uploaded";
+                }
                 appendDebugLog("agent screenshot command success=" + std::string(success ? "true" : "false"));
                 break;
             }
             case models::DeviceCommandType::RequestCameraCapture: {
                 const auto path = m_cameraCaptureAdapter.captureToFile(m_captureScheduler.settings().cameraOutputDirectory);
-                success = path.has_value()
-                    && m_uplinkSync.uploadCameraCapture(*path, snapshot, m_captureScheduler.settings().cameraContentType);
-                output = success ? "camera capture uploaded" : "camera capture failed";
+                if (!path.has_value()) {
+                    success = false;
+                    output = "camera capture create failed";
+                } else if (!m_uplinkSync.uploadCameraCapture(*path, snapshot, m_captureScheduler.settings().cameraContentType)) {
+                    success = false;
+                    output = "camera capture upload failed";
+                } else {
+                    success = true;
+                    output = "camera capture uploaded";
+                }
                 appendDebugLog("agent camera command success=" + std::string(success ? "true" : "false") + " path=" + (path.has_value() ? *path : std::string{}));
                 break;
             }
