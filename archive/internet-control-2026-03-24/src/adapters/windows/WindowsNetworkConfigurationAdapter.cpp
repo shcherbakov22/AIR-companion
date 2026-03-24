@@ -100,16 +100,63 @@ models::NetworkIdentity WindowsNetworkConfigurationAdapter::currentIdentity() co
 }
 
 bool WindowsNetworkConfigurationAdapter::ensureAirGateway(const std::string& gatewayIpv4, const std::string& dnsIpv4) {
-    (void) gatewayIpv4;
-    (void) dnsIpv4;
-    m_currentIdentity = currentIdentity();
-    m_currentIdentity.configuredThroughAirGateway = false;
-    m_state = "network passthrough";
+    const auto detected = detectPrimaryIdentity();
+    if (!detected.has_value()) {
+        m_state = "network detection failed";
+        return false;
+    }
+
+    m_currentIdentity = *detected;
+
+    if (!captureOriginalConfiguration()) {
+        m_state = "backup network config failed";
+        return false;
+    }
+
+    if (m_currentIdentity.gatewayIpv4 == gatewayIpv4
+        && (dnsIpv4.empty() || m_currentIdentity.dnsIpv4 == dnsIpv4)) {
+        m_currentIdentity.configuredThroughAirGateway = true;
+        m_state = dnsIpv4.empty()
+            ? "gateway " + gatewayIpv4
+            : "gateway " + gatewayIpv4 + " dns " + dnsIpv4;
+        return true;
+    }
+
+    const bool routeApplied = applyDefaultRoute(gatewayIpv4);
+    const bool dnsApplied = dnsIpv4.empty() || applyDnsServer(dnsIpv4);
+
+    if (!routeApplied || !dnsApplied) {
+        m_state = "gateway apply failed";
+        return false;
+    }
+
+    m_currentIdentity.gatewayIpv4 = gatewayIpv4;
+    if (!dnsIpv4.empty()) {
+        m_currentIdentity.dnsIpv4 = dnsIpv4;
+    }
+    m_currentIdentity.configuredThroughAirGateway = true;
+    m_state = dnsIpv4.empty()
+        ? "gateway " + gatewayIpv4
+        : "gateway " + gatewayIpv4 + " dns " + dnsIpv4;
     return true;
 }
 
 bool WindowsNetworkConfigurationAdapter::restorePreviousConfiguration() {
-    m_currentIdentity = currentIdentity();
+    if (!m_originalIdentity.has_value()) {
+        m_state = "network passthrough";
+        return true;
+    }
+
+    m_currentIdentity = *m_originalIdentity;
+
+    const bool routeApplied = m_currentIdentity.gatewayIpv4.empty() || applyDefaultRoute(m_currentIdentity.gatewayIpv4);
+    const bool dnsApplied = m_currentIdentity.dnsIpv4.empty() || applyDnsServer(m_currentIdentity.dnsIpv4);
+
+    if (!routeApplied || !dnsApplied) {
+        m_state = "restore network config failed";
+        return false;
+    }
+
     m_currentIdentity.configuredThroughAirGateway = false;
     m_state = "network passthrough";
     return true;

@@ -92,7 +92,17 @@ void terminateProcessesByName(const std::unordered_set<std::string>& blockedApps
 namespace companion::adapters::windows {
 
 void WindowsEnforcementAdapter::applyPolicy(const models::DevicePolicy& policy) {
-    m_lastState = "policy applied";
+    switch (policy.internetAccessMode) {
+        case models::InternetAccessMode::AllowAll:
+            m_lastState = "internet allow_all";
+            break;
+        case models::InternetAccessMode::BlockAll:
+            m_lastState = "internet block_all";
+            break;
+        case models::InternetAccessMode::AllowListOnly:
+            m_lastState = "internet allow_list_only";
+            break;
+    }
 
     if (policy.hasUnreadMentorChat || policy.hasUnreadAnnouncements) {
         m_lastState += " + communication gate";

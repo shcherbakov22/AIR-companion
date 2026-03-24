@@ -1,6 +1,7 @@
 #include "companion/core/UplinkSync.h"
 
 #include <chrono>
+#include <regex>
 #include <utility>
 
 namespace companion::core {
@@ -24,7 +25,16 @@ UplinkSync::UplinkSync(networking::CompanionApiClient apiClient,
 
 void UplinkSync::sync(const models::ActivitySnapshot& snapshot, const std::optional<models::DevicePolicy>& policy) {
     auto updatedSnapshot = snapshot;
-    (void) policy;
+
+    if (const auto gatewayIpv4 = gatewayHostIpv4(); gatewayIpv4.has_value()) {
+        if (m_networkConfigurationAdapter.ensureAirGateway(*gatewayIpv4, {})) {
+            m_status = "gateway enforced to " + *gatewayIpv4;
+        } else {
+            m_status = "gateway enforcement failed";
+        }
+    } else {
+        (void) policy;
+    }
 
     updatedSnapshot.networkIdentity = m_networkConfigurationAdapter.currentIdentity();
 
@@ -88,6 +98,24 @@ bool UplinkSync::shouldSendActivity(std::chrono::steady_clock::time_point now) c
 
 bool UplinkSync::shouldSendInstalledApps(std::chrono::steady_clock::time_point now) const {
     return !m_hasInstalledApps || (now - m_lastInstalledAppsAt) >= kInstalledAppsInterval;
+}
+
+std::optional<std::string> UplinkSync::gatewayHostIpv4() const {
+    static const std::regex kBaseUrlPattern(R"(^https?://([^/:]+))", std::regex::icase);
+    static const std::regex kIpv4Pattern(R"(^(\d{1,3}\.){3}\d{1,3}$)");
+
+    std::smatch match;
+    const auto& baseUrl = m_apiClient.baseUrl();
+    if (!std::regex_search(baseUrl, match, kBaseUrlPattern) || match.size() < 2) {
+        return std::nullopt;
+    }
+
+    const std::string host = match[1].str();
+    if (!std::regex_match(host, kIpv4Pattern)) {
+        return std::nullopt;
+    }
+
+    return host;
 }
 
 }  // namespace companion::core
