@@ -183,13 +183,13 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureInteractive(const
 #ifdef _WIN32
     GdiPlusSession gdiPlusSession;
 
-    const int screenX = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    const int screenY = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    const int screenWidth = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    const int screenHeight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    const int screenX = 0;
+    const int screenY = 0;
+    const int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+    const int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
     if (screenWidth <= 0 || screenHeight <= 0) {
-        appendDebugLog("screen capture interactive invalid virtual screen metrics");
+        appendDebugLog("screen capture interactive invalid primary screen metrics");
         return std::nullopt;
     }
 
