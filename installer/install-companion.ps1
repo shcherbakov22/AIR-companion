@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $logDirectory = Join-Path $env:ProgramData 'AIRCompanion\Logs'
 $logPath = Join-Path $logDirectory 'install.log'
 $bootstrapDirectory = Join-Path ([System.IO.Path]::GetTempPath()) 'AIRCompanion'
+$stagedBundleDirectory = Join-Path $bootstrapDirectory 'installer-bundle'
 $resultPath = Join-Path $bootstrapDirectory 'install-result.txt'
 $elevatedWrapperPath = Join-Path $bootstrapDirectory 'install-elevated.ps1'
 
@@ -77,6 +78,21 @@ try {
     $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     New-Item -ItemType Directory -Force -Path $bootstrapDirectory | Out-Null
+    if (Test-Path $stagedBundleDirectory) {
+        Remove-Item -Recurse -Force $stagedBundleDirectory
+    }
+    New-Item -ItemType Directory -Force -Path $stagedBundleDirectory | Out-Null
+
+    $sourceBundleDirectory = Split-Path -Parent $PSCommandPath
+    foreach ($payloadName in @('install-companion.ps1', 'air_companion_service.exe', 'air_companion_tray.exe', 'air_companion_updater.exe')) {
+        $sourcePath = Join-Path $sourceBundleDirectory $payloadName
+        if (-not (Test-Path $sourcePath)) {
+            throw "Missing installer payload file: $sourcePath"
+        }
+
+        Copy-Item -Path $sourcePath -Destination (Join-Path $stagedBundleDirectory $payloadName) -Force
+    }
+
     if (Test-Path $resultPath) {
         Remove-Item -Force $resultPath
     }
@@ -104,8 +120,9 @@ try {
 }
 '@ | Set-Content -Path $elevatedWrapperPath
 
+    $stagedScriptPath = Join-Path $stagedBundleDirectory 'install-companion.ps1'
     $argumentList = ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -ScriptPath "{1}" -ResultPath "{2}" -InstallDirectory "{3}" -EnrollmentUrl "{4}"' -f `
-        $elevatedWrapperPath, $PSCommandPath, $resultPath, $InstallDirectory, $EnrollmentUrl)
+        $elevatedWrapperPath, $stagedScriptPath, $resultPath, $InstallDirectory, $EnrollmentUrl)
     $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argumentList -PassThru -Wait
     if ($process.ExitCode -ne 0) {
         $childMessage = if (Test-Path $resultPath) {
