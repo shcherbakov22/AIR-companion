@@ -16,9 +16,10 @@ std::optional<BootstrapResult> Bootstrap::initialize() const {
         }
 
         networking::CompanionApiClient apiClient(stored->baseUrl);
-        if (const auto renewedToken = apiClient.renewToken(stored->deviceToken); renewedToken.has_value()) {
+        const auto renewResult = apiClient.renewToken(stored->deviceToken);
+        if (renewResult.token.has_value()) {
             auto refreshed = *stored;
-            refreshed.deviceToken = *renewedToken;
+            refreshed.deviceToken = *renewResult.token;
             (void)m_configStore.save(refreshed);
             return BootstrapResult{
                 std::move(apiClient),
@@ -27,7 +28,15 @@ std::optional<BootstrapResult> Bootstrap::initialize() const {
             };
         }
 
-        (void) m_configStore.clear();
+        if (renewResult.shouldClearSavedConfig) {
+            (void) m_configStore.clear();
+        } else {
+            return BootstrapResult{
+                std::move(apiClient),
+                std::move(*stored),
+                "loaded saved enrollment without token refresh",
+            };
+        }
     }
 
     if (const auto request = m_enrollmentRequestStore.load(); request.has_value()) {

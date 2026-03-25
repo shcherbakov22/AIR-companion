@@ -13,6 +13,11 @@
 
 namespace companion::networking {
 
+struct RenewTokenResult {
+    std::optional<std::string> token;
+    bool shouldClearSavedConfig{false};
+};
+
 class CompanionApiClient {
 public:
     CompanionApiClient(std::string baseUrl, HttpClient httpClient = {});
@@ -24,7 +29,7 @@ public:
     std::optional<models::DeviceEnrollment> claimEnrollment(
         const std::string& enrollmentToken,
         const models::DeviceIdentity& identity) const;
-    std::optional<std::string> renewToken(const std::string& deviceToken) const;
+    RenewTokenResult renewToken(const std::string& deviceToken) const;
 
     std::optional<models::DevicePolicy> fetchPolicy(const std::string& deviceToken) const;
 

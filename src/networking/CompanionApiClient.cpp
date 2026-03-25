@@ -218,17 +218,27 @@ std::optional<models::DeviceEnrollment> CompanionApiClient::claimEnrollment(
     return parseEnrollmentResponse(response.body, identity);
 }
 
-std::optional<std::string> CompanionApiClient::renewToken(const std::string& deviceToken) const {
+RenewTokenResult CompanionApiClient::renewToken(const std::string& deviceToken) const {
     const auto response = m_httpClient.post(
         m_baseUrl + "/api/companion/token/renew",
         jsonHeaders(deviceToken),
         "{}"
     );
+    appendDebugLog(
+        "renewToken status=" + std::to_string(response.statusCode)
+        + " body=" + response.body
+    );
     if (response.statusCode < 200 || response.statusCode >= 300) {
-        return std::nullopt;
+        return RenewTokenResult{
+            .token = std::nullopt,
+            .shouldClearSavedConfig = response.statusCode == 401 || response.statusCode == 403,
+        };
     }
 
-    return parseRenewTokenResponse(response.body);
+    return RenewTokenResult{
+        .token = parseRenewTokenResponse(response.body),
+        .shouldClearSavedConfig = false,
+    };
 }
 
 std::optional<models::DevicePolicy> CompanionApiClient::fetchPolicy(const std::string& deviceToken) const {
