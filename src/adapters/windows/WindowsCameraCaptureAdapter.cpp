@@ -27,6 +27,10 @@
 using Microsoft::WRL::ComPtr;
 
 namespace {
+constexpr DWORD kCameraWarmupMilliseconds = 1500;
+constexpr int kDiscardedWarmupFrames = 6;
+constexpr int kMaxFrameAttempts = 40;
+
 
 void appendDebugLog(const std::string& line) {
     const char* appData = std::getenv("APPDATA");
@@ -286,7 +290,11 @@ std::optional<std::string> WindowsCameraCaptureAdapter::captureToFile(const std:
     }
     appendDebugLog("camera: frame size=" + std::to_string(width) + "x" + std::to_string(height));
 
-    for (int attempt = 0; attempt < 30; ++attempt) {
+    appendDebugLog("camera: warming up for " + std::to_string(kCameraWarmupMilliseconds) + "ms");
+    Sleep(kCameraWarmupMilliseconds);
+
+    int capturedFrames = 0;
+    for (int attempt = 0; attempt < kMaxFrameAttempts; ++attempt) {
         DWORD streamIndex = 0;
         DWORD streamFlags = 0;
         LONGLONG timestamp = 0;
@@ -307,6 +315,13 @@ std::optional<std::string> WindowsCameraCaptureAdapter::captureToFile(const std:
 
         if ((streamFlags & MF_SOURCE_READERF_STREAMTICK) != 0 || sample == nullptr) {
             appendDebugLog("camera: stream tick or null sample attempt=" + std::to_string(attempt));
+            Sleep(50);
+            continue;
+        }
+
+        ++capturedFrames;
+        if (capturedFrames <= kDiscardedWarmupFrames) {
+            appendDebugLog("camera: discarding warmup frame=" + std::to_string(capturedFrames));
             Sleep(50);
             continue;
         }
