@@ -27,7 +27,6 @@ bool isProtectedProcessName(const std::string& processName) {
         "searchhost.exe",
         "searchapp.exe",
         "dwm.exe",
-        "taskmgr.exe",
     };
 
     return protectedNames.find(processName) != protectedNames.end();
