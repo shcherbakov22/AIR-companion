@@ -24,6 +24,29 @@ namespace companion::service {
 namespace {
 
 constexpr auto kUpdateCheckInterval = std::chrono::minutes(15);
+constexpr auto kUpdateLaunchGracePeriod = std::chrono::minutes(2);
+
+void appendDebugLog(const std::string& line) {
+#ifdef _WIN32
+    const char* appData = std::getenv("APPDATA");
+    if (appData == nullptr || *appData == '\0') {
+        return;
+    }
+
+    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
+    std::error_code errorCode;
+    std::filesystem::create_directories(logDirectory, errorCode);
+
+    std::ofstream output(logDirectory / "debug.log", std::ios::app);
+    if (!output.is_open()) {
+        return;
+    }
+
+    output << line << '\n';
+#else
+    (void) line;
+#endif
+}
 
 std::optional<std::string> extractJsonString(const std::string& body, const std::string& key) {
     const auto keyPos = body.find("\"" + key + "\"");
@@ -94,7 +117,17 @@ UpdateCoordinator::UpdateCoordinator(networking::CompanionApiClient apiClient, s
       m_currentVersion(std::move(currentVersion)) {}
 
 void UpdateCoordinator::tick() {
-    if (m_updateInProgress || !shouldCheckNow()) {
+    if (m_updateInProgress) {
+        if ((std::chrono::steady_clock::now() - m_updateLaunchedAt) >= kUpdateLaunchGracePeriod) {
+            m_updateInProgress = false;
+            m_status = "update retry after stalled launch";
+            appendDebugLog("update: updater grace period expired; retrying checks");
+        } else {
+            return;
+        }
+    }
+
+    if (!shouldCheckNow()) {
         return;
     }
 
@@ -102,32 +135,40 @@ void UpdateCoordinator::tick() {
     const auto manifest = m_apiClient.fetchUpdateManifest();
     if (!manifest.has_value() || !manifest->available) {
         m_status = "updates unavailable";
+        appendDebugLog("update: manifest unavailable");
         return;
     }
 
     if (!isNewerVersion(manifest->version, m_currentVersion)) {
         m_status = "updates current";
+        appendDebugLog("update: current version " + m_currentVersion + " already satisfies manifest " + manifest->version);
         return;
     }
 
+    appendDebugLog("update: manifest version=" + manifest->version + " current=" + m_currentVersion);
     const auto packagePath = stagePackagePath(*manifest);
     if (!m_apiClient.downloadFile(manifest->downloadUrl, packagePath)) {
         m_status = "update download failed";
+        appendDebugLog("update: download failed version=" + manifest->version);
         return;
     }
 
     if (!verifyChecksum(packagePath, manifest->sha256)) {
         m_status = "update checksum failed";
+        appendDebugLog("update: checksum failed path=" + packagePath);
         return;
     }
 
     if (!launchUpdater(packagePath)) {
         m_status = "update launch failed";
+        appendDebugLog("update: launch failed package=" + packagePath);
         return;
     }
 
     m_updateInProgress = true;
+    m_updateLaunchedAt = std::chrono::steady_clock::now();
     m_status = "update launched " + manifest->version;
+    appendDebugLog("update: launched updater for version=" + manifest->version + " package=" + packagePath);
 }
 
 std::string UpdateCoordinator::statusSummary() const {

@@ -29,6 +29,7 @@ private:
     std::string m_currentVersion;
     std::string m_status{"updates idle"};
     std::chrono::steady_clock::time_point m_lastCheck{};
+    std::chrono::steady_clock::time_point m_updateLaunchedAt{};
     bool m_updateInProgress{false};
 };
 
