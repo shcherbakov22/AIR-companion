@@ -5,6 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <dwmapi.h>
 #include <wtsapi32.h>
 #include <userenv.h>
 #endif
@@ -33,6 +34,15 @@ std::string trim(std::string value) {
 }
 
 #ifdef _WIN32
+constexpr DWORD kDwmwaCloaked = 14;
+
+std::string toLower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
 std::string narrow(const std::wstring& value) {
     if (value.empty()) {
         return {};
@@ -103,7 +113,29 @@ std::string readProcessName(HWND window) {
     return narrow(filename);
 }
 
-bool isAppWindow(HWND window) {
+bool isWindowCloaked(HWND window) {
+    BOOL cloaked = FALSE;
+    return SUCCEEDED(DwmGetWindowAttribute(window, kDwmwaCloaked, &cloaked, sizeof(cloaked))) && cloaked != FALSE;
+}
+
+bool isExcludedProcessName(const std::string& processName) {
+    static const std::unordered_set<std::string> excluded = {
+        "textinputhost.exe",
+        "searchhost.exe",
+        "searchapp.exe",
+        "shellexperiencehost.exe",
+        "startmenuexperiencehost.exe",
+        "lockapp.exe",
+        "widgets.exe",
+        "widgetboard.exe",
+        "gamebar.exe",
+        "applicationframehost.exe"
+    };
+
+    return excluded.contains(toLower(trim(processName)));
+}
+
+bool isAppWindow(HWND window, const std::string& processName) {
     if (!IsWindowVisible(window)) {
         return false;
     }
@@ -112,7 +144,7 @@ bool isAppWindow(HWND window) {
         return false;
     }
 
-    if (GetWindow(window, GW_OWNER) != nullptr) {
+    if (window == GetShellWindow()) {
         return false;
     }
 
@@ -121,8 +153,25 @@ bool isAppWindow(HWND window) {
         return false;
     }
 
+    if ((exStyle & WS_EX_NOACTIVATE) != 0) {
+        return false;
+    }
+
+    if (isWindowCloaked(window)) {
+        return false;
+    }
+
+    const auto rootOwner = GetAncestor(window, GA_ROOTOWNER);
+    if (rootOwner != nullptr && rootOwner != window) {
+        return false;
+    }
+
     const auto title = trim(narrow(readWindowTitle(window)));
     if (title.empty()) {
+        return false;
+    }
+
+    if (isExcludedProcessName(processName)) {
         return false;
     }
 
@@ -261,11 +310,15 @@ struct WindowScanState {
 
 BOOL CALLBACK collectTopLevelWindows(HWND window, LPARAM lParam) {
     auto* state = reinterpret_cast<WindowScanState*>(lParam);
-    if (state == nullptr || !isAppWindow(window)) {
+    if (state == nullptr) {
         return TRUE;
     }
 
     const auto processName = trim(readProcessName(window));
+    if (!isAppWindow(window, processName)) {
+        return TRUE;
+    }
+
     const auto windowTitle = trim(narrow(readWindowTitle(window)));
     if (processName.empty() && windowTitle.empty()) {
         return TRUE;
@@ -426,9 +479,12 @@ models::ActivitySnapshot WindowsAppTrackerAdapter::collectInteractiveSnapshot() 
     models::ActivitySnapshot snapshot;
 
 #ifdef _WIN32
-    if (const auto foreground = GetForegroundWindow(); foreground != nullptr && isAppWindow(foreground)) {
-        snapshot.focusedApp = trim(readProcessName(foreground));
-        snapshot.focusedWindowTitle = trim(narrow(readWindowTitle(foreground)));
+    if (const auto foreground = GetForegroundWindow(); foreground != nullptr) {
+        const auto foregroundProcessName = trim(readProcessName(foreground));
+        if (isAppWindow(foreground, foregroundProcessName)) {
+            snapshot.focusedApp = foregroundProcessName;
+            snapshot.focusedWindowTitle = trim(narrow(readWindowTitle(foreground)));
+        }
     }
 
     WindowScanState state;
