@@ -73,6 +73,7 @@ public:
 private:
     bool helperIsListening() const;
     bool activeConsoleSessionAvailable() const;
+    bool ensureFirewallRule() const;
     bool launchHelper();
     std::wstring helperBinaryPath() const;
     std::wstring helperStatePath() const;

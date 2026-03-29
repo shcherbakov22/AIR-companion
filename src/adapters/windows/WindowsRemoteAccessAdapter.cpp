@@ -83,6 +83,14 @@ bool WindowsRemoteAccessAdapter::startRemoteControl() {
         return false;
     }
 
+    if (!ensureFirewallRule()) {
+        m_state.ready = false;
+        m_state.active = false;
+        m_state.port = kRemoteControlPort;
+        m_state.failureReason = "failed to configure Windows firewall for remote control";
+        return false;
+    }
+
     if (helperIsListening()) {
         m_state.ready = true;
         m_state.active = true;
@@ -180,6 +188,26 @@ bool WindowsRemoteAccessAdapter::activeConsoleSessionAvailable() const {
 #ifdef _WIN32
     const DWORD sessionId = WTSGetActiveConsoleSessionId();
     return sessionId != 0xFFFFFFFF;
+#else
+    return false;
+#endif
+}
+
+bool WindowsRemoteAccessAdapter::ensureFirewallRule() const {
+#ifdef _WIN32
+    const auto ruleName = "AIR Companion Remote Control";
+    return runCommand(
+        "powershell -NoProfile -NonInteractive -Command \""
+        "$name = '" + std::string(ruleName) + "'; "
+        "$existing = Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue; "
+        "if (-not $existing) { "
+        "New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Allow -Protocol TCP -LocalPort " + std::to_string(kRemoteControlPort) + " -Profile Any | Out-Null "
+        "} else { "
+        "Set-NetFirewallRule -DisplayName $name -Enabled True -Action Allow -Profile Any | Out-Null; "
+        "Get-NetFirewallPortFilter -AssociatedNetFirewallRule $existing -ErrorAction SilentlyContinue | Out-Null "
+        "}; "
+        "exit 0\""
+    );
 #else
     return false;
 #endif
