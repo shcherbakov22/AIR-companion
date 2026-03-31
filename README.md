@@ -1,83 +1,108 @@
 # AIR Companion
 
-Windows-first native companion app for student machines.
+AIR Companion is the Windows-first native agent for student machines.
 
-This app is split into two binaries:
+## Repository
+
+- repo root:
+  - [C:\Users\user\codex\air-companion](C:\Users\user\codex\air-companion)
+- platform repo:
+  - [C:\Users\user\codex\school-system-redo](C:\Users\user\codex\school-system-redo)
+- consolidated handoff:
+  - [C:\Users\user\codex\AIR_HANDOFF_2026-03-31.md](C:\Users\user\codex\AIR_HANDOFF_2026-03-31.md)
+
+## What it does now
+
+- runs as a Windows service:
+  - `AIRCompanion`
+- enrolls with the AIR platform using a one-time enrollment token
+- persists device config locally
+- renews device auth tokens
+- uploads heartbeats and activity
+- uploads screenshots and camera captures
+- reports focused/open apps and installed apps
+- enforces blocked-process policy
+- supports remote-control helper startup
+- supports in-place update downloads and updater launch
+
+## Important binaries
 
 - `air_companion_service`
-  - background agent / service host
-  - handles enrollment, token persistence, policy polling, heartbeats, activity uploads, capture scheduling, and command execution
+  - service host and main agent loop
 - `air_companion_tray`
-  - helper / utility host
-  - runs interactive helper modes such as remote control and one-shot screen capture
-  - manages the machine-local enrollment request file from the command line
+  - utility/helper entry point
+  - writes enrollment request files
+  - runs one-shot helper operations used by the service
 
-## Current status
+## Current local paths on installed machines
 
-This directory contains the initial implementation scaffold for the new companion architecture:
-
-- core agent loop and config model
-- platform adapter interfaces
-- Windows adapter stubs
-- companion API client contract matching the Laravel backend
-- heartbeat and activity uplink wiring for the AIR companion API
-- network identity collection and Windows gateway/DNS adapter scaffolding
-- persisted local config under `%APPDATA%\\AIRCompanion\\config.json`
-- optional root CA download URL persisted with the local config
-- hidden internal capture settings under `%PROGRAMDATA%\\AIRCompanion\\Internal\\capture-settings.json`
-- first-run bootstrap through a machine-local enrollment request file
-- Windows trusted-root bootstrap for the AIR platform certificate
-- automatic startup through the Windows Service Control Manager
-- service host entry point
-- helper / utility entry point
-- Visual Studio-friendly CMake build files
+- install directory:
+  - `C:\Program Files\AIR Companion`
+- service config:
+  - `%APPDATA%\AIRCompanion\config.json`
+- backup config:
+  - `%APPDATA%\AIRCompanion\config.backup.json`
+- service-owned fallback config:
+  - `C:\ProgramData\AIRCompanion\Service\config.json`
+- pending enrollment request:
+  - `C:\ProgramData\AIRCompanion\Internal\enrollment-request.json`
+- machine capture settings:
+  - `C:\ProgramData\AIRCompanion\Internal\capture-settings.json`
+- service log:
+  - `C:\Windows\System32\config\systemprofile\AppData\Roaming\AIRCompanion\debug.log`
+- installer/enrollment logs:
+  - `C:\ProgramData\AIRCompanion\Logs`
 
 ## Build
 
-Recommended on Windows with Visual Studio 2022:
+Recommended:
+
+```powershell
+cmake --preset windows-release
+cmake --build --preset windows-release
+```
+
+Debug build:
 
 ```powershell
 cmake --preset windows-debug
 cmake --build --preset windows-debug
 ```
 
-Or directly:
-
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022"
-cmake --build build --config Debug
-```
-
 ## Test
 
-Run the native companion test suite with:
+Release tests:
+
+```powershell
+ctest -C Release --output-on-failure --test-dir build\windows-release
+```
+
+Debug tests:
 
 ```powershell
 ctest -C Debug --output-on-failure --test-dir build\windows-debug
 ```
 
-## Folder layout
+## Installer and update packaging
 
-- `docs/`
-  - architecture notes and implementation guidance
-- `include/companion/`
-  - public headers for models, networking, adapters, core logic, service, and tray
-- `src/core/`
-  - agent orchestration, policy sync, command polling, capture scheduling, and enforcement coordination
-- `src/networking/`
-  - AIR platform API client surface
-- `src/adapters/windows/`
-  - Windows-first adapter stubs
-- `src/service/`
-  - Windows service/agent host
-- `src/tray/`
-  - helper process entrypoints for remote control and capture
+- installer script:
+  - [C:\Users\user\codex\air-companion\installer\install-companion.ps1](C:\Users\user\codex\air-companion\installer\install-companion.ps1)
+- bundle builder:
+  - [C:\Users\user\codex\air-companion\installer\build-installer-bundle.ps1](C:\Users\user\codex\air-companion\installer\build-installer-bundle.ps1)
 
-## Backend contract
+Current expectations:
 
-This app targets only the current AIR platform. It expects the companion API group:
+- package from `windows-release`, not debug output
+- installer stages itself before elevation
+- installer self-elevates
+- installer maintains the Windows service and firewall rules
+- enrollment script writes the machine-local enrollment request consumed by the service
 
-- `POST /api/companion/enroll`
+## Backend contract in use
+
+The companion targets the AIR platform companion API, including:
+
+- `POST /api/companion/enroll/claim`
 - `POST /api/companion/token/renew`
 - `POST /api/companion/revoke`
 - `POST /api/companion/heartbeat`
@@ -88,25 +113,25 @@ This app targets only the current AIR platform. It expects the companion API gro
 - `GET /api/companion/commands/next`
 - `POST /api/companion/commands/{id}/acknowledge`
 - `POST /api/companion/commands/{id}/result`
+- update manifest and update package endpoints served by the platform
 
-## Notes
+## Notes that matter operationally
 
-- V1 is Windows-first and structured for Linux adapters later.
-- Internet policy is currently paused; the companion reports network identity but does not rewrite gateway or DNS.
-- First enrollment now happens through the hidden machine-local enrollment request file consumed by the service.
-- Enrollment/settings can also carry an optional root CA URL when the AIR platform serves its trusted root certificate from a custom endpoint.
-- `air_companion_service.exe` now runs as a real SCM-managed service when started by Windows, and falls back to console mode when launched directly.
-- You can write enrollment settings on an installed machine with:
-  - `air_companion_tray --write-enrollment --base-url <url> --username <name> --password <password> [--device-label <label>] [--root-ca-url <url>]`
-- You can print the expected enrollment request path with:
-  - `air_companion_tray --print-enrollment-path`
-- You can clear the pending enrollment request with:
-  - `air_companion_tray --clear-enrollment`
-- Headless bootstrap also accepts `AIR_COMPANION_ROOT_CA_URL` for the same override.
-- Screen/camera capture behavior is also driven by a separate hidden machine-level settings file for:
-  - local capture enablement
-  - minimum capture intervals
-  - output directories
-  - content types
-- No legacy compatibility is included here.
-- This scaffold is intentionally stub-heavy right now: it defines the native app shape and contracts, while the Laravel platform side already exposes the first companion API surface.
+- internet control was removed from the live runtime
+- enrollment is token-based, not student-password-based
+- screenshot capture uses an interactive helper staging through:
+  - `C:\Users\Public\AIRCompanion\InteractiveCapture`
+- remote control requires the platform-side start flow and the companion-side firewall rule path
+- config loss on transient token renew failure was fixed; only explicit auth rejection should clear config now
+- auto-update previously got stuck if an updater launch stalled; that failure mode was patched
+
+## Related files
+
+- core agent:
+  - [C:\Users\user\codex\air-companion\src\core](C:\Users\user\codex\air-companion\src\core)
+- Windows adapters:
+  - [C:\Users\user\codex\air-companion\src\adapters\windows](C:\Users\user\codex\air-companion\src\adapters\windows)
+- service host:
+  - [C:\Users\user\codex\air-companion\src\service](C:\Users\user\codex\air-companion\src\service)
+- tray/helper host:
+  - [C:\Users\user\codex\air-companion\src\tray](C:\Users\user\codex\air-companion\src\tray)
