@@ -234,6 +234,9 @@ std::optional<models::DeviceEnrollment> parseEnrollmentResponse(
         enrollment.identity.deviceLabel = jsonStringValue(*device, "label").value_or(identity.deviceLabel);
         enrollment.identity.hostname = jsonStringValue(*device, "hostname").value_or(identity.hostname);
     }
+    if (const auto web = jsonObjectString(responseBody, "web"); web.has_value()) {
+        enrollment.browserLoginUrl = jsonStringValue(*web, "browser_login_url").value_or({});
+    }
 
     return enrollment;
 }

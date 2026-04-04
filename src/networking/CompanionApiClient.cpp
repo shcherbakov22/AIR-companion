@@ -241,6 +241,23 @@ RenewTokenResult CompanionApiClient::renewToken(const std::string& deviceToken) 
     };
 }
 
+std::optional<std::string> CompanionApiClient::createBrowserLoginUrl(const std::string& deviceToken) const {
+    const auto response = m_httpClient.post(
+        m_baseUrl + "/api/companion/browser-login",
+        jsonHeaders(deviceToken),
+        "{}"
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+        return std::nullopt;
+    }
+
+    if (const auto web = extractJsonString(response.body, "browser_login_url"); web.has_value()) {
+        return web;
+    }
+
+    return std::nullopt;
+}
+
 std::optional<models::DevicePolicy> CompanionApiClient::fetchPolicy(const std::string& deviceToken) const {
     const auto response = m_httpClient.get(m_baseUrl + "/api/companion/policy", jsonHeaders(deviceToken));
     if (response.statusCode < 200 || response.statusCode >= 300) {

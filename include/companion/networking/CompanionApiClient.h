@@ -30,6 +30,7 @@ public:
         const std::string& enrollmentToken,
         const models::DeviceIdentity& identity) const;
     RenewTokenResult renewToken(const std::string& deviceToken) const;
+    std::optional<std::string> createBrowserLoginUrl(const std::string& deviceToken) const;
 
     std::optional<models::DevicePolicy> fetchPolicy(const std::string& deviceToken) const;
 

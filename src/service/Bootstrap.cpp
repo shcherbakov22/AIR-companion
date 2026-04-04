@@ -5,7 +5,44 @@
 #include <random>
 #include <sstream>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace companion::service {
+
+namespace {
+
+void launchBrowserLoginUrl(const std::string& browserLoginUrl) {
+#ifdef _WIN32
+    if (browserLoginUrl.empty()) {
+        return;
+    }
+
+    int wideLength = MultiByteToWideChar(CP_UTF8, 0, browserLoginUrl.c_str(), -1, nullptr, 0);
+    if (wideLength <= 0) {
+        return;
+    }
+
+    std::wstring wideUrl(static_cast<std::size_t>(wideLength), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, 0, browserLoginUrl.c_str(), -1, wideUrl.data(), wideLength) <= 0) {
+        return;
+    }
+
+    std::wstring command = L"cmd /c start \"\" \"";
+    command += wideUrl.c_str();
+    command += L"\"";
+
+    const int result = _wsystem(command.c_str());
+    if (result != 0) {
+        std::cerr << "AIR Companion failed to open browser login URL.\n";
+    }
+#else
+    (void) browserLoginUrl;
+#endif
+}
+
+}  // namespace
 
 Bootstrap::Bootstrap(CompanionConfigStore configStore) : m_configStore(std::move(configStore)) {}
 
@@ -158,6 +195,7 @@ std::optional<BootstrapResult> Bootstrap::initializeFromEnrollmentToken(
     config.identity = enrollment->identity;
     config.deviceToken = enrollment->deviceToken;
     (void) m_configStore.save(config);
+    launchBrowserLoginUrl(enrollment->browserLoginUrl);
 
     return BootstrapResult{
         std::move(apiClient),
@@ -196,6 +234,7 @@ std::optional<BootstrapResult> Bootstrap::initializeFromCredentials(
     config.identity = enrollment->identity;
     config.deviceToken = enrollment->deviceToken;
     (void) m_configStore.save(config);
+    launchBrowserLoginUrl(enrollment->browserLoginUrl);
 
     return BootstrapResult{
         std::move(apiClient),

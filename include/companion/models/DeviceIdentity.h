@@ -16,6 +16,7 @@ struct DeviceIdentity {
 struct DeviceEnrollment {
     DeviceIdentity identity;
     std::string deviceToken;
+    std::string browserLoginUrl;
 };
 
 }  // namespace companion::models
