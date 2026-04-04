@@ -17,7 +17,7 @@
 namespace companion::adapters::windows {
 
 namespace {
-constexpr int kBaudRate = 9600;
+constexpr int kBaudRate = 115200;
 constexpr auto kScanInterval = std::chrono::seconds(5);
 constexpr auto kProbeTimeout = std::chrono::milliseconds(2200);
 
