@@ -30,6 +30,9 @@ namespace {
 constexpr DWORD kCameraWarmupMilliseconds = 1500;
 constexpr int kDiscardedWarmupFrames = 6;
 constexpr int kMaxFrameAttempts = 40;
+constexpr INT kOutputWidth = 1920;
+constexpr INT kOutputHeight = 1080;
+constexpr ULONG kJpegQuality = 88;
 
 
 void appendDebugLog(const std::string& line) {
@@ -145,7 +148,24 @@ std::optional<CLSID> findEncoderClsid(const wchar_t* mimeType) {
     return std::nullopt;
 }
 
-std::optional<std::string> saveFrameAsPng(
+Gdiplus::Rect fitRect(INT sourceWidth, INT sourceHeight) {
+    if (sourceWidth <= 0 || sourceHeight <= 0) {
+        return {0, 0, kOutputWidth, kOutputHeight};
+    }
+
+    const double scaleX = static_cast<double>(kOutputWidth) / static_cast<double>(sourceWidth);
+    const double scaleY = static_cast<double>(kOutputHeight) / static_cast<double>(sourceHeight);
+    const double scale = scaleX < scaleY ? scaleX : scaleY;
+
+    const INT drawWidth = static_cast<INT>(sourceWidth * scale);
+    const INT drawHeight = static_cast<INT>(sourceHeight * scale);
+    const INT offsetX = (kOutputWidth - drawWidth) / 2;
+    const INT offsetY = (kOutputHeight - drawHeight) / 2;
+
+    return {offsetX, offsetY, drawWidth, drawHeight};
+}
+
+std::optional<std::string> saveFrameAsJpeg(
     const std::string& outputDirectory,
     const BYTE* buffer,
     UINT32 width,
@@ -158,22 +178,37 @@ std::optional<std::string> saveFrameAsPng(
         return std::nullopt;
     }
 
-    const auto encoderClsid = findEncoderClsid(L"image/png");
+    const auto encoderClsid = findEncoderClsid(L"image/jpeg");
     if (!encoderClsid.has_value()) {
         return std::nullopt;
     }
 
-    const auto outputPath = std::filesystem::path(outputDirectory) / "camera-capture.png";
+    const auto outputPath = std::filesystem::path(outputDirectory) / "camera-capture.jpg";
     const auto wideOutputPath = outputPath.wstring();
 
-    Gdiplus::Bitmap bitmap(
+    Gdiplus::Bitmap source(
         static_cast<INT>(width),
         static_cast<INT>(height),
         stride,
         PixelFormat32bppRGB,
         const_cast<BYTE*>(buffer));
 
-    if (bitmap.Save(wideOutputPath.c_str(), &encoderClsid.value(), nullptr) != Gdiplus::Ok) {
+    Gdiplus::Bitmap output(kOutputWidth, kOutputHeight, PixelFormat24bppRGB);
+    Gdiplus::Graphics graphics(&output);
+    graphics.Clear(Gdiplus::Color(0, 0, 0));
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+    graphics.DrawImage(&source, fitRect(static_cast<INT>(width), static_cast<INT>(height)));
+
+    Gdiplus::EncoderParameters encoderParameters{};
+    encoderParameters.Count = 1;
+    encoderParameters.Parameter[0].Guid = Gdiplus::EncoderQuality;
+    encoderParameters.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+    encoderParameters.Parameter[0].NumberOfValues = 1;
+    encoderParameters.Parameter[0].Value = const_cast<ULONG*>(&kJpegQuality);
+
+    if (output.Save(wideOutputPath.c_str(), &encoderClsid.value(), &encoderParameters) != Gdiplus::Ok) {
         return std::nullopt;
     }
 
@@ -341,7 +376,7 @@ std::optional<std::string> WindowsCameraCaptureAdapter::captureToFile(const std:
         }
 
         const LONG stride = static_cast<LONG>(width * 4);
-        const auto savedPath = saveFrameAsPng(outputDirectory, data, width, height, stride);
+        const auto savedPath = saveFrameAsJpeg(outputDirectory, data, width, height, stride);
         mediaBuffer->Unlock();
         appendDebugLog("camera: save result=" + std::string(savedPath.has_value() ? *savedPath : "null"));
         return savedPath;

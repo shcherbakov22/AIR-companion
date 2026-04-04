@@ -175,6 +175,15 @@ InternalCaptureSettings CaptureSettingsStore::loadOrCreate() const {
     settings.cameraOutputDirectory = normalizeOutputDirectory(extractJsonString(body, "camera_output_directory").value_or(settings.cameraOutputDirectory));
     settings.screenContentType = extractJsonString(body, "screen_content_type").value_or(settings.screenContentType);
     settings.cameraContentType = extractJsonString(body, "camera_content_type").value_or(settings.cameraContentType);
+
+    if (settings.screenContentType == "image/png") {
+        settings.screenContentType = "image/jpeg";
+    }
+
+    if (settings.cameraContentType == "image/png") {
+        settings.cameraContentType = "image/jpeg";
+    }
+
     return settings;
 }
 

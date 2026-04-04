@@ -16,6 +16,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -23,6 +24,9 @@ namespace companion::adapters::windows {
 
 #ifdef _WIN32
 namespace {
+constexpr int kOutputWidth = 1920;
+constexpr int kOutputHeight = 1080;
+constexpr ULONG kJpegQuality = 88;
 
 void appendDebugLog(const std::string& line) {
 #ifdef _WIN32
@@ -93,7 +97,7 @@ std::string wideToUtf8(const std::wstring& value) {
     return result;
 }
 
-bool pngEncoderClsid(CLSID& clsid) {
+bool encoderClsid(const wchar_t* mimeType, CLSID& clsid) {
     UINT encoderCount = 0;
     UINT encoderBytes = 0;
     if (Gdiplus::GetImageEncodersSize(&encoderCount, &encoderBytes) != Gdiplus::Ok || encoderBytes == 0) {
@@ -107,13 +111,64 @@ bool pngEncoderClsid(CLSID& clsid) {
     }
 
     for (UINT index = 0; index < encoderCount; ++index) {
-        if (wcscmp(encoders[index].MimeType, L"image/png") == 0) {
+        if (wcscmp(encoders[index].MimeType, mimeType) == 0) {
             clsid = encoders[index].Clsid;
             return true;
         }
     }
 
     return false;
+}
+
+Gdiplus::Rect fitRect(INT sourceWidth, INT sourceHeight) {
+    if (sourceWidth <= 0 || sourceHeight <= 0) {
+        return {0, 0, kOutputWidth, kOutputHeight};
+    }
+
+    const double scaleX = static_cast<double>(kOutputWidth) / static_cast<double>(sourceWidth);
+    const double scaleY = static_cast<double>(kOutputHeight) / static_cast<double>(sourceHeight);
+    const double scale = scaleX < scaleY ? scaleX : scaleY;
+
+    const INT drawWidth = static_cast<INT>(sourceWidth * scale);
+    const INT drawHeight = static_cast<INT>(sourceHeight * scale);
+    const INT offsetX = (kOutputWidth - drawWidth) / 2;
+    const INT offsetY = (kOutputHeight - drawHeight) / 2;
+
+    return {offsetX, offsetY, drawWidth, drawHeight};
+}
+
+std::optional<std::string> saveBitmapAsJpeg(HBITMAP bitmap, INT width, INT height, const std::string& outputPath) {
+    CLSID encoder{};
+    if (!encoderClsid(L"image/jpeg", encoder)) {
+        appendDebugLog("screen capture jpeg encoder lookup failed");
+        return std::nullopt;
+    }
+
+    Gdiplus::Bitmap source(bitmap, nullptr);
+    Gdiplus::Bitmap output(kOutputWidth, kOutputHeight, PixelFormat24bppRGB);
+    Gdiplus::Graphics graphics(&output);
+    graphics.Clear(Gdiplus::Color(0, 0, 0));
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+
+    const auto targetRect = fitRect(width, height);
+    graphics.DrawImage(&source, targetRect);
+
+    Gdiplus::EncoderParameters encoderParameters{};
+    encoderParameters.Count = 1;
+    encoderParameters.Parameter[0].Guid = Gdiplus::EncoderQuality;
+    encoderParameters.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+    encoderParameters.Parameter[0].NumberOfValues = 1;
+    encoderParameters.Parameter[0].Value = const_cast<ULONG*>(&kJpegQuality);
+
+    const auto widePath = utf8ToWide(outputPath);
+    if (output.Save(widePath.c_str(), &encoder, &encoderParameters) != Gdiplus::Ok) {
+        appendDebugLog("screen capture jpeg save failed path=" + outputPath);
+        return std::nullopt;
+    }
+
+    return outputPath;
 }
 
 std::wstring currentExecutablePath() {
@@ -193,8 +248,7 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureInteractive(const
         return std::nullopt;
     }
 
-    const auto path = outputDirectory + "/screen-capture.png";
-    const auto widePath = utf8ToWide(path);
+    const auto path = outputDirectory + "/screen-capture.jpg";
 
     HDC screenDc = GetDC(nullptr);
     if (!screenDc) {
@@ -223,17 +277,9 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureInteractive(const
 
     std::optional<std::string> result;
     if (copied) {
-        CLSID encoder{};
-        if (pngEncoderClsid(encoder)) {
-            Gdiplus::Bitmap image(bitmap, nullptr);
-            if (image.Save(widePath.c_str(), &encoder, nullptr) == Gdiplus::Ok) {
-                result = path;
-                appendDebugLog("screen capture interactive saved path=" + path);
-            } else {
-                appendDebugLog("screen capture interactive GDI+ save failed path=" + path);
-            }
-        } else {
-            appendDebugLog("screen capture interactive png encoder lookup failed");
+        result = saveBitmapAsJpeg(bitmap, screenWidth, screenHeight, path);
+        if (result.has_value()) {
+            appendDebugLog("screen capture interactive saved path=" + path);
         }
     } else {
         appendDebugLog("screen capture interactive BitBlt failed");
@@ -254,7 +300,7 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionH
     (void) outputDirectory;
     const auto stagingDirectory = sharedInteractiveCaptureDirectory();
     std::filesystem::create_directories(stagingDirectory);
-    const auto stagingPath = stagingDirectory / "screen-capture.png";
+    const auto stagingPath = stagingDirectory / "screen-capture.jpg";
     std::error_code errorCode;
     std::filesystem::remove(stagingPath, errorCode);
     appendDebugLog("screen capture helper staging=" + wideToUtf8(stagingPath.wstring()));

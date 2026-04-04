@@ -11,8 +11,8 @@ struct InternalCaptureSettings {
     int minimumCameraIntervalSeconds{15};
     std::string screenOutputDirectory{"captures\\screen"};
     std::string cameraOutputDirectory{"captures\\camera"};
-    std::string screenContentType{"image/png"};
-    std::string cameraContentType{"image/png"};
+    std::string screenContentType{"image/jpeg"};
+    std::string cameraContentType{"image/jpeg"};
 };
 
 class CaptureSettingsStore {
