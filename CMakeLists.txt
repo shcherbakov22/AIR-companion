@@ -41,6 +41,7 @@ set(COMPANION_CORE_SOURCES
     src/adapters/windows/WindowsCameraCaptureAdapter.cpp
     src/adapters/windows/WindowsEnforcementAdapter.cpp
     src/adapters/windows/WindowsNetworkConfigurationAdapter.cpp
+    src/adapters/windows/WindowsPushUpCounterAdapter.cpp
     src/adapters/windows/WindowsRemoteAccessAdapter.cpp
     src/adapters/windows/WindowsScreenCaptureAdapter.cpp
     src/adapters/windows/WindowsServiceLifecycleAdapter.cpp
@@ -49,6 +50,7 @@ set(COMPANION_CORE_SOURCES
     src/core/CommandPoller.cpp
     src/core/EnforcementCoordinator.cpp
     src/core/PolicySync.cpp
+    src/core/PushUpStationCoordinator.cpp
     src/core/UplinkSync.cpp
     src/service/Bootstrap.cpp
     src/service/BootAutoStartRegistrar.cpp

@@ -73,6 +73,7 @@ Agent::Agent(PolicySync policySync,
              CommandPoller commandPoller,
              CaptureScheduler captureScheduler,
              EnforcementCoordinator enforcementCoordinator,
+             PushUpStationCoordinator pushUpStationCoordinator,
              UplinkSync uplinkSync,
              service::UpdateCoordinator updateCoordinator,
           adapters::IAppTrackerAdapter& appTrackerAdapter,
@@ -85,6 +86,7 @@ Agent::Agent(PolicySync policySync,
       m_commandPoller(std::move(commandPoller)),
       m_captureScheduler(std::move(captureScheduler)),
       m_enforcementCoordinator(std::move(enforcementCoordinator)),
+      m_pushUpStationCoordinator(std::move(pushUpStationCoordinator)),
       m_uplinkSync(std::move(uplinkSync)),
       m_updateCoordinator(std::move(updateCoordinator)),
       m_appTrackerAdapter(appTrackerAdapter),
@@ -108,6 +110,8 @@ void Agent::tick() {
     if (!m_running) {
         return;
     }
+
+    m_pushUpStationCoordinator.tick();
 
     const auto now = std::chrono::steady_clock::now();
     if (!m_hasInstalledAppsCache || (now - m_lastInstalledAppsCollectedAt) >= kInstalledAppsRefreshInterval) {
@@ -208,6 +212,7 @@ void Agent::tick() {
     m_updateCoordinator.tick();
 
     m_status += " | " + m_uplinkSync.statusSummary()
+        + " | " + m_pushUpStationCoordinator.statusSummary()
         + " | " + m_updateCoordinator.statusSummary();
 }
 

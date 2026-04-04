@@ -14,6 +14,7 @@
 #include "companion/core/CommandPoller.h"
 #include "companion/core/EnforcementCoordinator.h"
 #include "companion/core/PolicySync.h"
+#include "companion/core/PushUpStationCoordinator.h"
 #include "companion/core/UplinkSync.h"
 #include "companion/service/UpdateCoordinator.h"
 
@@ -25,6 +26,7 @@ public:
           CommandPoller commandPoller,
           CaptureScheduler captureScheduler,
           EnforcementCoordinator enforcementCoordinator,
+          PushUpStationCoordinator pushUpStationCoordinator,
           UplinkSync uplinkSync,
           service::UpdateCoordinator updateCoordinator,
           adapters::IAppTrackerAdapter& appTrackerAdapter,
@@ -47,6 +49,7 @@ private:
     CommandPoller m_commandPoller;
     CaptureScheduler m_captureScheduler;
     EnforcementCoordinator m_enforcementCoordinator;
+    PushUpStationCoordinator m_pushUpStationCoordinator;
     UplinkSync m_uplinkSync;
     service::UpdateCoordinator m_updateCoordinator;
     adapters::IAppTrackerAdapter& m_appTrackerAdapter;

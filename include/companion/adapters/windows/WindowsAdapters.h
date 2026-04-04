@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -10,6 +11,7 @@
 #include "companion/adapters/IEnforcementAdapter.h"
 #include "companion/adapters/IAppTrackerAdapter.h"
 #include "companion/adapters/INetworkConfigurationAdapter.h"
+#include "companion/adapters/IPushUpCounterAdapter.h"
 #include "companion/adapters/IRemoteAccessAdapter.h"
 #include "companion/adapters/IScreenCaptureAdapter.h"
 #include "companion/adapters/IServiceLifecycleAdapter.h"
@@ -105,6 +107,26 @@ private:
     mutable models::NetworkIdentity m_currentIdentity{};
     std::optional<models::NetworkIdentity> m_originalIdentity;
     std::string m_state{"network passthrough"};
+};
+
+class WindowsPushUpCounterAdapter final : public IPushUpCounterAdapter {
+public:
+    void tick() override;
+    const PushUpCounterState& state() const override;
+    bool startSession(const std::string& sessionId, int totalReps, int dropThreshold, int upGap, int downTolerance) override;
+    bool abortSession(const std::string& sessionId) override;
+    bool consumeCompletion() override;
+
+private:
+    bool connectIfNeeded();
+    void disconnect();
+    void processIncoming();
+    bool sendLine(const std::string& line);
+
+    void* m_handle{nullptr};
+    PushUpCounterState m_state{};
+    std::string m_buffer;
+    std::chrono::steady_clock::time_point m_lastScanAt{};
 };
 
 }  // namespace companion::adapters::windows

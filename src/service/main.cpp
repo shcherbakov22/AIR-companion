@@ -4,6 +4,7 @@
 #include "companion/core/CommandPoller.h"
 #include "companion/core/EnforcementCoordinator.h"
 #include "companion/core/PolicySync.h"
+#include "companion/core/PushUpStationCoordinator.h"
 #include "companion/networking/CompanionApiClient.h"
 #include "companion/service/Bootstrap.h"
 #include "companion/service/CaptureSettingsStore.h"
@@ -43,7 +44,7 @@ int main() {
     companion::service::ServiceHost serviceHost([](companion::service::ServiceHost& host) {
         while (!host.stopRequested()) {
             companion::service::Bootstrap bootstrap;
-            const auto bootstrapped = bootstrap.initialize();
+            auto bootstrapped = bootstrap.initialize();
             if (!bootstrapped.has_value()) {
                 companion::service::EnrollmentRequestStore enrollmentRequestStore;
                 const auto requestPath = enrollmentRequestStore.requestPath();
@@ -65,6 +66,7 @@ int main() {
             companion::adapters::windows::WindowsCameraCaptureAdapter cameraCaptureAdapter;
             companion::adapters::windows::WindowsEnforcementAdapter enforcementAdapter;
             companion::adapters::windows::WindowsNetworkConfigurationAdapter networkConfigurationAdapter;
+            companion::adapters::windows::WindowsPushUpCounterAdapter pushUpCounterAdapter;
             companion::adapters::windows::WindowsRemoteAccessAdapter remoteAccessAdapter;
             companion::service::CaptureSettingsStore captureSettingsStore;
             const auto captureSettings = captureSettingsStore.loadOrCreate();
@@ -85,6 +87,12 @@ int main() {
                 std::move(commandPoller),
                 std::move(captureScheduler),
                 std::move(enforcementCoordinator),
+                companion::core::PushUpStationCoordinator(
+                    bootstrapped->apiClient,
+                    bootstrapped->config.deviceToken,
+                    bootstrapped->config.identity,
+                    pushUpCounterAdapter
+                ),
                 std::move(uplinkSync),
                 std::move(updateCoordinator),
                 appTrackerAdapter,
