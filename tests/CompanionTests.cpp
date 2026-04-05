@@ -1065,6 +1065,83 @@ void testPushUpAdapterStateTransitions() {
     requireEqual(adapter.state().status, std::string("idle"), "status should be idle after abort");
 }
 
+void testPushUpAdapterTestModePumpsFullSequence() {
+    using namespace companion;
+    using namespace companion::test;
+
+    FakePushUpCounterAdapter adapter;
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+    adapter.setTestMode(true);
+
+    // startSession with TEST mode (3 reps) should queue:
+    // SET 1 3 3, STATE SEARCHING_BACK, STATE WORK, REP 1, REP 2, REP 3, STATE COMPLETE
+    bool started = adapter.startSession("test-session", 3, 80, 80, 80);
+    require(started, "startSession should succeed when connected and firmware ready");
+
+    // Verify initial state
+    requireEqual(adapter.state().status, std::string("ready"), "status should be ready after start");
+    requireEqual(adapter.state().currentRep, 0, "currentRep should be 0 initially");
+    require(!adapter.state().completionPending, "completionPending should be false initially");
+
+    // Pump through all responses (2.5s is the real launch pump duration)
+    adapter.pumpIncomingFor(std::chrono::milliseconds(2500));
+
+    // After full pump, should be complete
+    requireEqual(adapter.state().status, std::string("complete"), "status should be complete after pumping all reps");
+    requireEqual(adapter.state().currentRep, 3, "currentRep should be 3 after all reps");
+    require(adapter.state().completionPending, "completionPending should be true after STATE COMPLETE");
+
+    // consumeCompletion should clear the flag
+    bool consumed = adapter.consumeCompletion();
+    require(consumed, "consumeCompletion should return true when pending");
+    require(!adapter.state().completionPending, "completionPending should be cleared after consume");
+}
+
+void testPushUpAdapterProtocolLineParsing() {
+    using namespace companion::test;
+
+    FakePushUpCounterAdapter adapter;
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+
+    // HELLO
+    adapter.processLine("HELLO 1");
+    require(adapter.state().firmwareReady, "firmwareReady should be set on HELLO");
+    requireEqual(adapter.state().status, std::string("ready"), "status should be ready after HELLO");
+
+    // DIST
+    adapter.processLine("DIST 42");
+    requireEqual(adapter.state().distance, 42, "distance should be parsed from DIST line");
+
+    // SET
+    adapter.processLine("SET 1 10 7");
+    requireEqual(adapter.state().currentSet, 1, "currentSet should be parsed from SET line");
+
+    // REP
+    adapter.processLine("REP 5");
+    requireEqual(adapter.state().currentRep, 5, "currentRep should be parsed from REP line");
+
+    // STATE transitions
+    adapter.processLine("STATE SEARCHING_BACK");
+    require(adapter.state().searchingBack, "searchingBack should be set");
+    requireEqual(adapter.state().status, std::string("searching_back"), "status should be searching_back");
+
+    adapter.processLine("STATE WORK");
+    require(adapter.state().working, "working should be set");
+    require(!adapter.state().searchingBack, "searchingBack should be cleared");
+    requireEqual(adapter.state().status, std::string("working"), "status should be working");
+
+    adapter.processLine("STATE COMPLETE");
+    require(adapter.state().completionPending, "completionPending should be set on COMPLETE");
+    require(!adapter.state().working, "working should be cleared");
+    requireEqual(adapter.state().status, std::string("complete"), "status should be complete");
+
+    adapter.processLine("STATE IDLE");
+    // Note: completionPending is NOT cleared by STATE IDLE - only consumeCompletion clears it
+    requireEqual(adapter.state().status, std::string("idle"), "status should be idle");
+}
+
 }  // namespace
 
 int main() {
@@ -1146,6 +1223,8 @@ int main() {
         {"pushUpCoordinatorSyncsCompletionOnFinish",   testPushUpCoordinatorSyncsCompletionOnFinish},
         {"pushUpCoordinatorFailsSessionOnDisconnect",   testPushUpCoordinatorFailsSessionOnDisconnect},
         {"pushUpAdapterStateTransitions",              testPushUpAdapterStateTransitions},
+        {"pushUpAdapterTestModePumpsFullSequence",     testPushUpAdapterTestModePumpsFullSequence},
+        {"pushUpAdapterProtocolLineParsing",           testPushUpAdapterProtocolLineParsing},
     };
 
     int failures = 0;
