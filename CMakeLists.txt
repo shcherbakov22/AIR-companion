@@ -100,7 +100,7 @@ endif()
 
 if(WIN32)
     target_compile_definitions(air_companion_core PUBLIC AIR_COMPANION_WINDOWS=1)
-    target_link_libraries(air_companion_core PUBLIC vncserver iphlpapi ws2_32 crypt32 gdiplus mf mfplat mfreadwrite mfuuid ole32 user32 advapi32 wtsapi32 userenv d3d11 dxgi dxguid dwmapi)
+    target_link_libraries(air_companion_core PUBLIC vncserver iphlpapi ws2_32 crypt32 gdiplus mf mfplat mfreadwrite mfuuid ole32 user32 advapi32 wtsapi32 userenv d3d11 dxgi dxguid dwmapi winhttp)
 endif()
 
 add_test(NAME air_companion_tests COMMAND air_companion_tests)

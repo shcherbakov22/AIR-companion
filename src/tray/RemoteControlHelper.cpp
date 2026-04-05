@@ -341,8 +341,8 @@ void pointerEvent(int buttonMask, int x, int y, rfbClientPtr client) {
     auto* context = static_cast<RemoteContext*>(client->screen->screenData);
     const int screenWidth = GetSystemMetrics(SM_CXVIRTUALSCREEN);
     const int screenHeight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-    const int clampedX = max(0, min(x, context->width - 1));
-    const int clampedY = max(0, min(y, context->height - 1));
+    const int clampedX = std::max(0, std::min(x, context->width - 1));
+    const int clampedY = std::max(0, std::min(y, context->height - 1));
 
     INPUT moveInput{};
     moveInput.type = INPUT_MOUSE;

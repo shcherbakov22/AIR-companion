@@ -33,6 +33,16 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "COMPANION_COVERAGE": "ON"
       }
+    },
+    {
+      "name": "mingw-w64-release",
+      "displayName": "MinGW-w64 Windows Release (cross-compile from Linux)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/mingw-w64-release",
+      "toolchainFile": "${sourceDir}/cmake/mingw-w64.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -49,6 +59,10 @@
     {
       "name": "linux-coverage",
       "configurePreset": "linux-coverage"
+    },
+    {
+      "name": "mingw-w64-release",
+      "configurePreset": "mingw-w64-release"
     }
   ]
 }
