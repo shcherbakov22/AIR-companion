@@ -121,6 +121,7 @@ private:
     bool connectIfNeeded();
     void disconnect();
     void processIncoming();
+    void pumpIncomingFor(std::chrono::milliseconds duration);
     bool sendLine(const std::string& line);
 
     void* m_handle{nullptr};

@@ -20,6 +20,12 @@ namespace {
 constexpr int kBaudRate = 115200;
 constexpr auto kScanInterval = std::chrono::seconds(5);
 constexpr auto kProbeTimeout = std::chrono::milliseconds(2200);
+constexpr auto kLaunchPumpDuration = std::chrono::milliseconds(2500);
+
+bool pushUpTestModeEnabled() {
+    const char* value = std::getenv("AIR_PUSHUP_COUNTER_TEST_MODE");
+    return value != nullptr && *value != '\0' && std::string(value) != "0";
+}
 
 void appendDebugLog(const std::string& line) {
 #ifdef _WIN32
@@ -147,7 +153,16 @@ bool WindowsPushUpCounterAdapter::startSession(const std::string& sessionId, int
     m_state.currentRep = 0;
     m_state.currentSet = 1;
     m_state.completionPending = false;
-    return sendLine("START " + sessionId + " " + std::to_string(totalReps) + " " + std::to_string(dropThreshold) + " " + std::to_string(upGap) + " " + std::to_string(downTolerance));
+    const std::string command = pushUpTestModeEnabled()
+        ? ("TEST " + sessionId + " " + std::to_string(totalReps) + " 80")
+        : ("START " + sessionId + " " + std::to_string(totalReps) + " " + std::to_string(dropThreshold) + " " + std::to_string(upGap) + " " + std::to_string(downTolerance));
+    appendDebugLog("push-up counter send: " + command);
+    if (!sendLine(command)) {
+        return false;
+    }
+
+    pumpIncomingFor(kLaunchPumpDuration);
+    return true;
 #else
     (void) sessionId;
     (void) totalReps;
@@ -306,6 +321,7 @@ void WindowsPushUpCounterAdapter::processIncoming() {
         }
 
         if (line.rfind("HELLO", 0) == 0 || line == "PONG") {
+            appendDebugLog("push-up counter recv: " + line);
             m_state.firmwareReady = true;
             m_state.status = "ready";
             continue;
@@ -317,11 +333,13 @@ void WindowsPushUpCounterAdapter::processIncoming() {
         }
 
         if (line.rfind("REP ", 0) == 0) {
+            appendDebugLog("push-up counter recv: " + line);
             m_state.currentRep = std::atoi(line.substr(4).c_str());
             continue;
         }
 
         if (line.rfind("SET ", 0) == 0) {
+            appendDebugLog("push-up counter recv: " + line);
             const auto firstSpace = line.find(' ');
             const auto secondSpace = line.find(' ', firstSpace + 1);
             if (secondSpace != std::string::npos) {
@@ -331,6 +349,7 @@ void WindowsPushUpCounterAdapter::processIncoming() {
         }
 
         if (line == "STATE SEARCHING_BACK") {
+            appendDebugLog("push-up counter recv: " + line);
             m_state.searchingBack = true;
             m_state.working = false;
             m_state.status = "searching_back";
@@ -338,6 +357,7 @@ void WindowsPushUpCounterAdapter::processIncoming() {
         }
 
         if (line == "STATE WORK") {
+            appendDebugLog("push-up counter recv: " + line);
             m_state.searchingBack = false;
             m_state.working = true;
             m_state.status = "working";
@@ -345,6 +365,7 @@ void WindowsPushUpCounterAdapter::processIncoming() {
         }
 
         if (line == "STATE COMPLETE") {
+            appendDebugLog("push-up counter recv: " + line);
             m_state.searchingBack = false;
             m_state.working = false;
             m_state.status = "complete";
@@ -353,12 +374,34 @@ void WindowsPushUpCounterAdapter::processIncoming() {
         }
 
         if (line == "STATE IDLE") {
+            appendDebugLog("push-up counter recv: " + line);
             m_state.searchingBack = false;
             m_state.working = false;
             m_state.status = "idle";
             continue;
         }
     }
+#endif
+}
+
+void WindowsPushUpCounterAdapter::pumpIncomingFor(std::chrono::milliseconds duration) {
+#ifdef _WIN32
+    const bool testMode = pushUpTestModeEnabled();
+    const auto deadline = std::chrono::steady_clock::now() + duration;
+    while (std::chrono::steady_clock::now() < deadline) {
+        processIncoming();
+        if (m_state.completionPending) {
+            break;
+        }
+
+        if (!testMode && (m_state.working || m_state.searchingBack || m_state.currentRep > 0)) {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+#else
+    (void) duration;
 #endif
 }
 

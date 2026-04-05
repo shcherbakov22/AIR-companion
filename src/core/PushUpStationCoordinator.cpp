@@ -1,5 +1,8 @@
 #include "companion/core/PushUpStationCoordinator.h"
 
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <utility>
 
 namespace companion::core {
@@ -7,6 +10,24 @@ namespace companion::core {
 namespace {
 constexpr auto kHeartbeatInterval = std::chrono::seconds(5);
 constexpr auto kSessionIdleTimeout = std::chrono::seconds(60);
+
+void appendDebugLog(const std::string& line) {
+    const char* appData = std::getenv("APPDATA");
+    if (appData == nullptr || *appData == '\0') {
+        return;
+    }
+
+    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
+    std::error_code errorCode;
+    std::filesystem::create_directories(logDirectory, errorCode);
+
+    std::ofstream output(logDirectory / "debug.log", std::ios::app);
+    if (!output.is_open()) {
+        return;
+    }
+
+    output << line << '\n';
+}
 }
 
 PushUpStationCoordinator::PushUpStationCoordinator(
@@ -81,6 +102,9 @@ void PushUpStationCoordinator::syncHeartbeat() {
 
     m_pendingCount = result->pendingCount;
     if (result->currentSession.has_value()) {
+        if (!m_session.has_value() || m_session->id != result->currentSession->id || m_session->status != result->currentSession->status) {
+            appendDebugLog("push-up heartbeat current session: " + result->currentSession->id + " status=" + result->currentSession->status);
+        }
         m_session = result->currentSession;
     } else if (m_session.has_value() && m_session->status == "completed") {
         m_session.reset();
@@ -94,6 +118,7 @@ void PushUpStationCoordinator::ensureSessionClaimed() {
 
     m_session = m_apiClient.pushUpStationClaimNext(m_deviceToken, m_stationKey, m_stationName);
     if (m_session.has_value()) {
+        appendDebugLog("push-up session claimed: " + m_session->id + " reps=" + std::to_string(m_session->requiredPushUps));
         m_launchedSessionId.clear();
         m_startSynced = false;
         m_lastProgressRep = 0;
@@ -120,12 +145,14 @@ void PushUpStationCoordinator::ensureSessionLaunched() {
         return;
     }
 
+    appendDebugLog("push-up session launched locally: " + m_session->id);
     m_launchedSessionId = m_session->id;
     m_lastProgressRep = 0;
     m_lastMeaningfulActivityAt = std::chrono::steady_clock::now();
 
     if (!m_startSynced) {
         m_startSynced = m_apiClient.pushUpStationStart(m_deviceToken, m_stationKey, m_session->id);
+        appendDebugLog(std::string("push-up session start sync ") + (m_startSynced ? "ok: " : "failed: ") + m_session->id);
     }
 }
 
@@ -146,6 +173,7 @@ void PushUpStationCoordinator::syncProgress() {
         state.currentRep,
         state.currentSet
     )) {
+        appendDebugLog("push-up progress sync ok: session=" + m_session->id + " rep=" + std::to_string(state.currentRep) + " set=" + std::to_string(state.currentSet));
         m_lastProgressRep = state.currentRep;
         m_lastMeaningfulActivityAt = std::chrono::steady_clock::now();
     }
@@ -160,12 +188,16 @@ void PushUpStationCoordinator::syncCompletion() {
         return;
     }
 
+    appendDebugLog("push-up completion pending: " + m_session->id);
     if (m_apiClient.pushUpStationComplete(m_deviceToken, m_stationKey, m_session->id)) {
+        appendDebugLog("push-up completion sync ok: " + m_session->id);
         m_session.reset();
         m_launchedSessionId.clear();
         m_startSynced = false;
         m_lastProgressRep = 0;
         m_lastMeaningfulActivityAt = {};
+    } else {
+        appendDebugLog("push-up completion sync failed: " + m_session->id);
     }
 }
 
@@ -174,6 +206,7 @@ void PushUpStationCoordinator::failActiveSession(const std::string& notes) {
         return;
     }
 
+    appendDebugLog("push-up session fail: " + m_session->id + " notes=" + notes);
     (void) m_apiClient.pushUpStationFail(m_deviceToken, m_stationKey, m_session->id, notes);
     m_session.reset();
     m_launchedSessionId.clear();
