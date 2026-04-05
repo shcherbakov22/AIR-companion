@@ -116,18 +116,25 @@ public:
     bool startSession(const std::string& sessionId, int totalReps, int dropThreshold, int upGap, int downTolerance) override;
     bool abortSession(const std::string& sessionId) override;
     bool consumeCompletion() override;
+    void processLine(const std::string& line) override;
+    void resetAfterInactivity() override;
 
 private:
     bool connectIfNeeded();
     void disconnect();
     void processIncoming();
     void pumpIncomingFor(std::chrono::milliseconds duration);
+    void parseLine(const std::string& line);
     bool sendLine(const std::string& line);
+    void checkInactivityReset();
+
+    static constexpr auto kInactivityTimeout = std::chrono::seconds(60);
 
     void* m_handle{nullptr};
     PushUpCounterState m_state{};
     std::string m_buffer;
     std::chrono::steady_clock::time_point m_lastScanAt{};
+    std::chrono::steady_clock::time_point m_lastCommunicationAt{};
 };
 
 }  // namespace companion::adapters::windows

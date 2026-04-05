@@ -104,7 +104,7 @@ bool configureSerialPort(HANDLE handle) {
     return true;
 }
 
-bool readChunk(HANDLE handle, std::string& buffer) {
+bool readChunk(HANDLE handle, std::string& buffer, std::chrono::steady_clock::time_point& lastComm) {
     char chunk[256]{};
     DWORD bytesRead = 0;
     if (!ReadFile(handle, chunk, static_cast<DWORD>(sizeof(chunk)), &bytesRead, nullptr)) {
@@ -113,6 +113,7 @@ bool readChunk(HANDLE handle, std::string& buffer) {
 
     if (bytesRead > 0) {
         buffer.append(chunk, chunk + bytesRead);
+        lastComm = std::chrono::steady_clock::now();
     }
 
     return true;
@@ -137,6 +138,7 @@ void WindowsPushUpCounterAdapter::tick() {
     }
 
     processIncoming();
+    checkInactivityReset();
 #endif
 }
 
@@ -237,7 +239,7 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
         const auto deadline = std::chrono::steady_clock::now() + kProbeTimeout;
         bool matched = false;
         while (std::chrono::steady_clock::now() < deadline) {
-            if (!readChunk(candidate, probeBuffer)) {
+            if (!readChunk(candidate, probeBuffer, m_lastCommunicationAt)) {
                 break;
             }
 
@@ -297,6 +299,7 @@ void WindowsPushUpCounterAdapter::disconnect() {
     m_state.status = "disconnected";
     m_state.portName.clear();
     m_buffer.clear();
+    m_lastCommunicationAt = {};
 }
 
 void WindowsPushUpCounterAdapter::processIncoming() {
@@ -305,7 +308,7 @@ void WindowsPushUpCounterAdapter::processIncoming() {
         return;
     }
 
-    if (!readChunk(static_cast<HANDLE>(m_handle), m_buffer)) {
+    if (!readChunk(static_cast<HANDLE>(m_handle), m_buffer, m_lastCommunicationAt)) {
         appendDebugLog("push-up counter read failed, disconnecting");
         disconnect();
         return;
@@ -315,71 +318,84 @@ void WindowsPushUpCounterAdapter::processIncoming() {
     while ((newline = m_buffer.find('\n')) != std::string::npos) {
         auto line = trimLine(m_buffer.substr(0, newline));
         m_buffer.erase(0, newline + 1);
+        parseLine(line);
+    }
+#endif
+}
 
-        if (line.empty()) {
-            continue;
-        }
+void WindowsPushUpCounterAdapter::processLine(const std::string& rawLine) {
+#ifdef _WIN32
+    parseLine(trimLine(rawLine));
+#else
+    (void)rawLine;
+#endif
+}
 
-        if (line.rfind("HELLO", 0) == 0 || line == "PONG") {
-            appendDebugLog("push-up counter recv: " + line);
-            m_state.firmwareReady = true;
-            m_state.status = "ready";
-            continue;
-        }
+void WindowsPushUpCounterAdapter::parseLine(const std::string& line) {
+#ifdef _WIN32
+    if (line.empty()) {
+        return;
+    }
 
-        if (line.rfind("DIST ", 0) == 0) {
-            m_state.distance = std::atoi(line.substr(5).c_str());
-            continue;
-        }
+    if (line.rfind("HELLO", 0) == 0 || line == "PONG") {
+        appendDebugLog("push-up counter recv: " + line);
+        m_state.firmwareReady = true;
+        m_state.status = "ready";
+        return;
+    }
 
-        if (line.rfind("REP ", 0) == 0) {
-            appendDebugLog("push-up counter recv: " + line);
-            m_state.currentRep = std::atoi(line.substr(4).c_str());
-            continue;
-        }
+    if (line.rfind("DIST ", 0) == 0) {
+        m_state.distance = std::atoi(line.substr(5).c_str());
+        return;
+    }
 
-        if (line.rfind("SET ", 0) == 0) {
-            appendDebugLog("push-up counter recv: " + line);
-            const auto firstSpace = line.find(' ');
-            const auto secondSpace = line.find(' ', firstSpace + 1);
-            if (secondSpace != std::string::npos) {
-                m_state.currentSet = std::atoi(line.substr(firstSpace + 1, secondSpace - firstSpace - 1).c_str());
-            }
-            continue;
-        }
+    if (line.rfind("REP ", 0) == 0) {
+        appendDebugLog("push-up counter recv: " + line);
+        m_state.currentRep = std::atoi(line.substr(4).c_str());
+        return;
+    }
 
-        if (line == "STATE SEARCHING_BACK") {
-            appendDebugLog("push-up counter recv: " + line);
-            m_state.searchingBack = true;
-            m_state.working = false;
-            m_state.status = "searching_back";
-            continue;
+    if (line.rfind("SET ", 0) == 0) {
+        appendDebugLog("push-up counter recv: " + line);
+        const auto firstSpace = line.find(' ');
+        const auto secondSpace = line.find(' ', firstSpace + 1);
+        if (secondSpace != std::string::npos) {
+            m_state.currentSet = std::atoi(line.substr(firstSpace + 1, secondSpace - firstSpace - 1).c_str());
         }
+        return;
+    }
 
-        if (line == "STATE WORK") {
-            appendDebugLog("push-up counter recv: " + line);
-            m_state.searchingBack = false;
-            m_state.working = true;
-            m_state.status = "working";
-            continue;
-        }
+    if (line == "STATE SEARCHING_BACK") {
+        appendDebugLog("push-up counter recv: " + line);
+        m_state.searchingBack = true;
+        m_state.working = false;
+        m_state.status = "searching_back";
+        return;
+    }
 
-        if (line == "STATE COMPLETE") {
-            appendDebugLog("push-up counter recv: " + line);
-            m_state.searchingBack = false;
-            m_state.working = false;
-            m_state.status = "complete";
-            m_state.completionPending = true;
-            continue;
-        }
+    if (line == "STATE WORK") {
+        appendDebugLog("push-up counter recv: " + line);
+        m_state.searchingBack = false;
+        m_state.working = true;
+        m_state.status = "working";
+        return;
+    }
 
-        if (line == "STATE IDLE") {
-            appendDebugLog("push-up counter recv: " + line);
-            m_state.searchingBack = false;
-            m_state.working = false;
-            m_state.status = "idle";
-            continue;
-        }
+    if (line == "STATE COMPLETE") {
+        appendDebugLog("push-up counter recv: " + line);
+        m_state.searchingBack = false;
+        m_state.working = false;
+        m_state.status = "complete";
+        m_state.completionPending = true;
+        return;
+    }
+
+    if (line == "STATE IDLE") {
+        appendDebugLog("push-up counter recv: " + line);
+        m_state.searchingBack = false;
+        m_state.working = false;
+        m_state.status = "idle";
+        return;
     }
 #endif
 }
@@ -420,10 +436,37 @@ bool WindowsPushUpCounterAdapter::sendLine(const std::string& line) {
         return false;
     }
 
+    if (bytesWritten == payload.size()) {
+        m_lastCommunicationAt = std::chrono::steady_clock::now();
+    }
     return bytesWritten == payload.size();
 #else
     (void) line;
     return false;
+#endif
+}
+
+void WindowsPushUpCounterAdapter::checkInactivityReset() {
+#ifdef _WIN32
+    if (m_handle == nullptr || static_cast<HANDLE>(m_handle) == invalidHandle()) {
+        return;
+    }
+
+    if (m_lastCommunicationAt.time_since_epoch().count() == 0) {
+        return;
+    }
+
+    if ((std::chrono::steady_clock::now() - m_lastCommunicationAt) >= kInactivityTimeout) {
+        appendDebugLog("push-up counter inactivity timeout, resetting connection");
+        disconnect();
+    }
+#endif
+}
+
+void WindowsPushUpCounterAdapter::resetAfterInactivity() {
+#ifdef _WIN32
+    appendDebugLog("push-up counter manual inactivity reset");
+    disconnect();
 #endif
 }
 

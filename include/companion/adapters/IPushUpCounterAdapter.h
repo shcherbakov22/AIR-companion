@@ -28,6 +28,7 @@ public:
     virtual bool abortSession(const std::string& sessionId) = 0;
     virtual bool consumeCompletion() = 0;
     virtual void processLine(const std::string& line) = 0;
+    virtual void resetAfterInactivity() = 0;
 };
 
 }  // namespace companion::adapters

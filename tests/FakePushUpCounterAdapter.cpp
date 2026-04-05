@@ -247,4 +247,8 @@ void FakePushUpCounterAdapter::simulateDisconnection() {
     setConnected(false);
 }
 
+void FakePushUpCounterAdapter::resetAfterInactivity() {
+    setConnected(false);
+}
+
 }  // namespace companion::test

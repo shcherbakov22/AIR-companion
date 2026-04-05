@@ -19,6 +19,7 @@ public:
     bool abortSession(const std::string& sessionId) override;
     bool consumeCompletion() override;
     void processLine(const std::string& line) override;
+    void resetAfterInactivity() override;
 
     // Test helpers
     void setConnected(bool connected);
