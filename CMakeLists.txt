@@ -36,15 +36,6 @@ set(COMPANION_CORE_SOURCES
     src/networking/HttpClient.cpp
     src/networking/CompanionApiClient.cpp
     src/networking/CompanionApiParsers.cpp
-    src/adapters/windows/WindowsAppTrackerAdapter.cpp
-    src/adapters/windows/WindowsBrowserDomainAdapter.cpp
-    src/adapters/windows/WindowsCameraCaptureAdapter.cpp
-    src/adapters/windows/WindowsEnforcementAdapter.cpp
-    src/adapters/windows/WindowsNetworkConfigurationAdapter.cpp
-    src/adapters/windows/WindowsPushUpCounterAdapter.cpp
-    src/adapters/windows/WindowsRemoteAccessAdapter.cpp
-    src/adapters/windows/WindowsScreenCaptureAdapter.cpp
-    src/adapters/windows/WindowsServiceLifecycleAdapter.cpp
     src/core/Agent.cpp
     src/core/CaptureScheduler.cpp
     src/core/CommandPoller.cpp
@@ -57,11 +48,25 @@ set(COMPANION_CORE_SOURCES
     src/service/CaptureSettingsStore.cpp
     src/service/CompanionConfigStore.cpp
     src/service/EnrollmentRequestStore.cpp
-    src/service/ServiceHost.cpp
     src/service/TrustedRootInstaller.cpp
     src/service/UpdateCoordinator.cpp
     src/tray/RemoteControlHelper.cpp
 )
+
+if(WIN32)
+    list(APPEND COMPANION_CORE_SOURCES
+        src/adapters/windows/WindowsAppTrackerAdapter.cpp
+        src/adapters/windows/WindowsBrowserDomainAdapter.cpp
+        src/adapters/windows/WindowsCameraCaptureAdapter.cpp
+        src/adapters/windows/WindowsEnforcementAdapter.cpp
+        src/adapters/windows/WindowsNetworkConfigurationAdapter.cpp
+        src/adapters/windows/WindowsPushUpCounterAdapter.cpp
+        src/adapters/windows/WindowsRemoteAccessAdapter.cpp
+        src/adapters/windows/WindowsScreenCaptureAdapter.cpp
+        src/adapters/windows/WindowsServiceLifecycleAdapter.cpp
+        src/service/ServiceHost.cpp
+    )
+endif()
 
 add_library(air_companion_core STATIC ${COMPANION_CORE_SOURCES})
 
