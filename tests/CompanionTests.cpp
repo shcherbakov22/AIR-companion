@@ -1,11 +1,16 @@
 #include "companion/core/CaptureScheduler.h"
+#include "companion/core/PushUpStationCoordinator.h"
 #include "companion/models/DevicePolicy.h"
+#include "companion/models/PushUpStationSession.h"
 #include "companion/networking/CompanionApiParsers.h"
 #include "companion/service/UpdateCoordinator.h"
 #include "companion/service/BootAutoStartRegistrar.h"
 #include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
 #include "companion/service/TrustedRootInstaller.h"
+
+#include "FakePushUpCounterAdapter.h"
+#include "FakeCompanionApiClient.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -807,6 +812,259 @@ void testUpdateCoordinatorVersionComparison() {
     require(!companion::service::UpdateCoordinator::isNewerVersion("0.1.0", "0.1.1"), "older version should not be newer");
 }
 
+void testPushUpCoordinatorClaimsSessionOnStartup() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev123";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-abc";
+    session.requiredPushUps = 10;
+    session.dropThreshold = 5;
+    session.upGap = 100;
+    session.downTolerance = 200;
+    session.status = "claimed";
+
+    api.setClaimNextResponse(session);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+
+    coordinator.tick();
+
+    auto calls = api.calls();
+    bool foundClaim = false;
+    for (const auto& call : calls) {
+        if (call.kind == PushUpStationApiCall::Kind::ClaimNext) {
+            foundClaim = true;
+            break;
+        }
+    }
+    require(foundClaim, "coordinator should call claimNext when no session exists");
+}
+
+void testPushUpCoordinatorLaunchesSessionWhenClaimed() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev123";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-xyz";
+    session.requiredPushUps = 5;
+    session.dropThreshold = 3;
+    session.upGap = 80;
+    session.downTolerance = 150;
+    session.status = "claimed";
+
+    api.setClaimNextResponse(session);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+
+    coordinator.tick();  // claim session
+    coordinator.tick();  // launch session
+
+    bool foundStart = false;
+    for (const auto& call : api.calls()) {
+        if (call.kind == PushUpStationApiCall::Kind::Start) {
+            foundStart = true;
+            requireEqual(call.sessionId, std::string("session-xyz"), "start should be for claimed session");
+            break;
+        }
+    }
+    require(foundStart, "coordinator should call pushUpStationStart after claiming");
+}
+
+void testPushUpCoordinatorSyncsProgressOnRepIncrement() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev123";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-progress";
+    session.requiredPushUps = 10;
+    session.dropThreshold = 5;
+    session.upGap = 100;
+    session.downTolerance = 200;
+    session.status = "in_progress";
+
+    api.setClaimNextResponse(session);
+    api.setStartResponse(true);
+    api.setProgressResponse(true);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+
+    coordinator.tick();  // claim
+    coordinator.tick();  // launch
+    adapter.simulateRepIncrement(1, 1);
+    coordinator.tick();  // detect rep and sync
+
+    bool foundProgress = false;
+    for (const auto& call : api.calls()) {
+        if (call.kind == PushUpStationApiCall::Kind::Progress) {
+            foundProgress = true;
+            requireEqual(call.progressRep, 1, "progress should report rep 1");
+            requireEqual(call.sessionId, std::string("session-progress"), "progress session id should match");
+            break;
+        }
+    }
+    require(foundProgress, "coordinator should call pushUpStationProgress on rep increment");
+}
+
+void testPushUpCoordinatorSyncsCompletionOnFinish() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev123";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-complete";
+    session.requiredPushUps = 3;
+    session.dropThreshold = 5;
+    session.upGap = 100;
+    session.downTolerance = 200;
+    session.status = "in_progress";
+
+    api.setClaimNextResponse(session);
+    api.setStartResponse(true);
+    api.setProgressResponse(true);
+    api.setCompleteResponse(true);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+
+    coordinator.tick();  // claim
+    coordinator.tick();  // launch
+    adapter.simulateRepIncrement(1, 1);
+    coordinator.tick();  // sync rep 1
+    adapter.simulateRepIncrement(2, 1);
+    coordinator.tick();  // sync rep 2
+    adapter.simulateRepIncrement(3, 1);
+    coordinator.tick();  // this should trigger completionPending
+    coordinator.tick();  // this should consume completion and sync
+
+    bool foundComplete = false;
+    for (const auto& call : api.calls()) {
+        if (call.kind == PushUpStationApiCall::Kind::Complete) {
+            foundComplete = true;
+            requireEqual(call.sessionId, std::string("session-complete"), "complete session id should match");
+            break;
+        }
+    }
+    require(foundComplete, "coordinator should call pushUpStationComplete when session finishes");
+}
+
+void testPushUpCoordinatorFailsSessionOnDisconnect() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev456";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-disconnect";
+    session.requiredPushUps = 10;
+    session.dropThreshold = 5;
+    session.upGap = 100;
+    session.downTolerance = 200;
+    session.status = "in_progress";
+
+    api.setClaimNextResponse(session);
+    api.setStartResponse(true);
+    api.setFailResponse(true);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+
+    coordinator.tick();  // claim
+    coordinator.tick();  // launch
+
+    adapter.simulateDisconnection();
+    coordinator.tick();  // should detect disconnect and fail
+
+    bool foundFail = false;
+    for (const auto& call : api.calls()) {
+        if (call.kind == PushUpStationApiCall::Kind::Fail) {
+            foundFail = true;
+            requireEqual(call.sessionId, std::string("session-disconnect"), "fail session id should match");
+            require(call.failNotes.find("disconnected") != std::string::npos, "fail notes should mention disconnection");
+            break;
+        }
+    }
+    require(foundFail, "coordinator should call pushUpStationFail when adapter disconnects with active session");
+}
+
+void testPushUpAdapterStateTransitions() {
+    using namespace companion;
+    using namespace companion::test;
+
+    FakePushUpCounterAdapter adapter;
+
+    require(!adapter.state().connected, "adapter should start disconnected");
+    requireEqual(adapter.state().status, std::string("disconnected"), "status should be disconnected initially");
+
+    adapter.setConnected(true);
+    require(adapter.state().connected, "adapter should be connected after setConnected(true)");
+    requireEqual(adapter.state().status, std::string("disconnected"), "status still disconnected before firmware ready");
+
+    adapter.setFirmwareReady(true);
+    require(adapter.state().firmwareReady, "adapter should be firmware ready");
+    requireEqual(adapter.state().status, std::string("ready"), "status should be ready");
+
+    adapter.startSession("sess1", 10, 5, 100, 200);
+    requireEqual(adapter.state().currentRep, 0, "currentRep should reset on startSession");
+    requireEqual(adapter.state().currentSet, 1, "currentSet should reset on startSession");
+
+    adapter.simulateRepIncrement(5, 1);
+    requireEqual(adapter.state().currentRep, 5, "simulateRepIncrement should set currentRep");
+    requireEqual(adapter.state().currentSet, 1, "simulateRepIncrement should set currentSet");
+
+    adapter.simulateCompletion();
+    require(adapter.state().completionPending, "completionPending should be set after simulateCompletion");
+    requireEqual(adapter.state().status, std::string("complete"), "status should be complete");
+
+    bool consumed = adapter.consumeCompletion();
+    require(consumed, "consumeCompletion should return true when pending");
+    require(!adapter.consumeCompletion(), "consumeCompletion should return false after consuming");
+
+    adapter.abortSession("sess1");
+    requireEqual(adapter.state().currentRep, 0, "currentRep should reset on abortSession");
+    requireEqual(adapter.state().status, std::string("idle"), "status should be idle after abort");
+}
+
 }  // namespace
 
 int main() {
@@ -880,6 +1138,14 @@ int main() {
         {"enrollmentRequestStoreRequestPathAccessor",  testEnrollmentRequestStoreRequestPathAccessor},
         {"enrollmentRequestStoreSavesAndLoadsUsernamePassword", testEnrollmentRequestStoreSavesAndLoadsUsernamePassword},
         {"enrollmentRequestStoreClearRemovesFile",     testEnrollmentRequestStoreClearRemovesFile},
+
+        // Push-up station coordinator tests
+        {"pushUpCoordinatorClaimsSessionOnStartup",   testPushUpCoordinatorClaimsSessionOnStartup},
+        {"pushUpCoordinatorLaunchesSessionWhenClaimed", testPushUpCoordinatorLaunchesSessionWhenClaimed},
+        {"pushUpCoordinatorSyncsProgressOnRepIncrement", testPushUpCoordinatorSyncsProgressOnRepIncrement},
+        {"pushUpCoordinatorSyncsCompletionOnFinish",   testPushUpCoordinatorSyncsCompletionOnFinish},
+        {"pushUpCoordinatorFailsSessionOnDisconnect",   testPushUpCoordinatorFailsSessionOnDisconnect},
+        {"pushUpAdapterStateTransitions",              testPushUpAdapterStateTransitions},
     };
 
     int failures = 0;

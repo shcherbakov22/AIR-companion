@@ -63,29 +63,29 @@ public:
                              const std::string& filePath,
                              const models::ActivitySnapshot& snapshot,
                              const std::string& contentType) const;
-    std::optional<PushUpStationHeartbeatResult> pushUpStationHeartbeat(
+    virtual std::optional<PushUpStationHeartbeatResult> pushUpStationHeartbeat(
         const std::string& deviceToken,
         const std::string& stationKey,
         const std::string& stationName) const;
-    std::optional<models::PushUpStationSession> pushUpStationClaimNext(
+    virtual std::optional<models::PushUpStationSession> pushUpStationClaimNext(
         const std::string& deviceToken,
         const std::string& stationKey,
         const std::string& stationName) const;
-    bool pushUpStationStart(
+    virtual bool pushUpStationStart(
         const std::string& deviceToken,
         const std::string& stationKey,
         const std::string& sessionId) const;
-    bool pushUpStationProgress(
+    virtual bool pushUpStationProgress(
         const std::string& deviceToken,
         const std::string& stationKey,
         const std::string& sessionId,
         int currentRep,
         int currentSet) const;
-    bool pushUpStationComplete(
+    virtual bool pushUpStationComplete(
         const std::string& deviceToken,
         const std::string& stationKey,
         const std::string& sessionId) const;
-    bool pushUpStationFail(
+    virtual bool pushUpStationFail(
         const std::string& deviceToken,
         const std::string& stationKey,
         const std::string& sessionId,

@@ -92,7 +92,7 @@ target_link_libraries(air_companion_tray PRIVATE air_companion_core)
 add_executable(air_companion_updater src/updater/main.cpp)
 target_link_libraries(air_companion_updater PRIVATE air_companion_core)
 
-add_executable(air_companion_tests tests/CompanionTests.cpp)
+add_executable(air_companion_tests tests/CompanionTests.cpp tests/FakePushUpCounterAdapter.cpp tests/FakeCompanionApiClient.cpp)
 target_link_libraries(air_companion_tests PRIVATE air_companion_core)
 
 if(COMPANION_COVERAGE)
