@@ -23,6 +23,16 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "linux-coverage",
+      "displayName": "Linux Coverage (gcc/clang)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/linux-coverage",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "COMPANION_COVERAGE": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -35,6 +45,10 @@
       "name": "windows-release",
       "configurePreset": "windows-release",
       "configuration": "Release"
+    },
+    {
+      "name": "linux-coverage",
+      "configurePreset": "linux-coverage"
     }
   ]
 }
