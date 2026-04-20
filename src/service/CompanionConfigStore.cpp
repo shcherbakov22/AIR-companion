@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <system_error>
 #include <sstream>
 
 namespace companion::service {
@@ -72,6 +73,41 @@ std::optional<std::string> extractJsonString(const std::string& body, const std:
 
 }  // namespace
 
+std::string pathString(const std::filesystem::path& path) {
+    return path.string();
+}
+
+std::filesystem::path userConfigBaseDirectory() {
+#ifdef _WIN32
+    if (const auto* appData = std::getenv("APPDATA"); appData != nullptr && *appData != '\0') {
+        return std::filesystem::path(appData) / "AIRCompanion";
+    }
+
+    return std::filesystem::path(".") / "AIRCompanion";
+#else
+    if (const auto* xdgConfigHome = std::getenv("XDG_CONFIG_HOME"); xdgConfigHome != nullptr && *xdgConfigHome != '\0') {
+        return std::filesystem::path(xdgConfigHome) / "AIRCompanion";
+    }
+    if (const auto* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        return std::filesystem::path(home) / ".config" / "AIRCompanion";
+    }
+
+    return std::filesystem::path(".") / "AIRCompanion";
+#endif
+}
+
+std::filesystem::path machineConfigBaseDirectory() {
+#ifdef _WIN32
+    if (const auto* programData = std::getenv("PROGRAMDATA"); programData != nullptr && *programData != '\0') {
+        return std::filesystem::path(programData) / "AIRCompanion" / "Service";
+    }
+
+    return std::filesystem::path(".") / "AIRCompanion" / "Service";
+#else
+    return std::filesystem::path("/etc") / "air-companion";
+#endif
+}
+
 std::optional<StoredCompanionConfig> CompanionConfigStore::loadFromPath(const std::string& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input.is_open()) {
@@ -112,7 +148,7 @@ std::optional<StoredCompanionConfig> CompanionConfigStore::load() const {
         return backup;
     }
 
-    const auto machine = loadFromPath(machineConfigDirectory() + "\\config.json");
+    const auto machine = loadFromPath(pathString(std::filesystem::path(machineConfigDirectory()) / "config.json"));
     if (machine.has_value()) {
         (void) save(*machine);
         return machine;
@@ -153,7 +189,7 @@ bool CompanionConfigStore::saveToPath(const std::string& path, const StoredCompa
 bool CompanionConfigStore::save(const StoredCompanionConfig& config) const {
     const auto primarySaved = saveToPath(configPath(), config);
     const auto backupSaved = saveToPath(backupConfigPath(), config);
-    const auto machineSaved = saveToPath(machineConfigDirectory() + "\\config.json", config);
+    const auto machineSaved = saveToPath(pathString(std::filesystem::path(machineConfigDirectory()) / "config.json"), config);
 
     return primarySaved || backupSaved || machineSaved;
 }
@@ -162,32 +198,24 @@ bool CompanionConfigStore::clear() const {
     std::error_code error;
     std::filesystem::remove(configPath(), error);
     std::filesystem::remove(backupConfigPath(), error);
-    std::filesystem::remove(machineConfigDirectory() + "\\config.json", error);
+    std::filesystem::remove(pathString(std::filesystem::path(machineConfigDirectory()) / "config.json"), error);
     return !error;
 }
 
 std::string CompanionConfigStore::configPath() const {
-    return configDirectory() + "\\config.json";
+    return pathString(std::filesystem::path(configDirectory()) / "config.json");
 }
 
 std::string CompanionConfigStore::backupConfigPath() const {
-    return configDirectory() + "\\config.backup.json";
+    return pathString(std::filesystem::path(configDirectory()) / "config.backup.json");
 }
 
 std::string CompanionConfigStore::configDirectory() {
-    if (const auto* appData = std::getenv("APPDATA"); appData != nullptr && *appData != '\0') {
-        return std::string(appData) + "\\AIRCompanion";
-    }
-
-    return ".\\AIRCompanion";
+    return pathString(userConfigBaseDirectory());
 }
 
 std::string CompanionConfigStore::machineConfigDirectory() {
-    if (const auto* programData = std::getenv("PROGRAMDATA"); programData != nullptr && *programData != '\0') {
-        return std::string(programData) + "\\AIRCompanion\\Service";
-    }
-
-    return ".\\AIRCompanion\\Service";
+    return pathString(machineConfigBaseDirectory());
 }
 
 }  // namespace companion::service

@@ -16,24 +16,26 @@ if(MINGW)
     add_link_options(-static -static-libgcc -static-libstdc++)
 endif()
 
-include(FetchContent)
+if(WIN32)
+    include(FetchContent)
 
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(WITH_TESTS OFF CACHE BOOL "" FORCE)
-set(WITH_ZLIB OFF CACHE BOOL "" FORCE)
-set(WITH_OPENSSL OFF CACHE BOOL "" FORCE)
-set(WITH_GNUTLS OFF CACHE BOOL "" FORCE)
-set(WITH_GCRYPT OFF CACHE BOOL "" FORCE)
-set(WITH_SASL OFF CACHE BOOL "" FORCE)
-set(WITH_FFMPEG OFF CACHE BOOL "" FORCE)
-set(LIBVNCSERVER_WITH_WEBSOCKETS OFF CACHE BOOL "" FORCE)
-set(LIBVNCSERVER_INSTALL OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(WITH_TESTS OFF CACHE BOOL "" FORCE)
+    set(WITH_ZLIB OFF CACHE BOOL "" FORCE)
+    set(WITH_OPENSSL OFF CACHE BOOL "" FORCE)
+    set(WITH_GNUTLS OFF CACHE BOOL "" FORCE)
+    set(WITH_GCRYPT OFF CACHE BOOL "" FORCE)
+    set(WITH_SASL OFF CACHE BOOL "" FORCE)
+    set(WITH_FFMPEG OFF CACHE BOOL "" FORCE)
+    set(LIBVNCSERVER_WITH_WEBSOCKETS OFF CACHE BOOL "" FORCE)
+    set(LIBVNCSERVER_INSTALL OFF CACHE BOOL "" FORCE)
 
-FetchContent_Declare(
-    libvncserver
-    URL https://github.com/LibVNC/libvncserver/archive/refs/tags/LibVNCServer-0.9.14.tar.gz
-)
-FetchContent_MakeAvailable(libvncserver)
+    FetchContent_Declare(
+        libvncserver
+        URL https://github.com/LibVNC/libvncserver/archive/refs/tags/LibVNCServer-0.9.14.tar.gz
+    )
+    FetchContent_MakeAvailable(libvncserver)
+endif()
 
 enable_testing()
 
@@ -79,26 +81,44 @@ target_include_directories(
     air_companion_core
     PUBLIC
         include
-        ${libvncserver_SOURCE_DIR}
-        ${libvncserver_BINARY_DIR}
 )
+
+if(WIN32)
+    target_include_directories(
+        air_companion_core
+        PUBLIC
+            ${libvncserver_SOURCE_DIR}
+            ${libvncserver_BINARY_DIR}
+    )
+endif()
 
 target_compile_definitions(air_companion_core
     PUBLIC
         AIR_COMPANION_VERSION="${PROJECT_VERSION}"
 )
 
-add_executable(air_companion_service src/service/main.cpp)
-target_link_libraries(air_companion_service PRIVATE air_companion_core)
+if(WIN32)
+    add_executable(air_companion_service src/service/main.cpp)
+    target_link_libraries(air_companion_service PRIVATE air_companion_core)
 
-add_executable(air_companion_tray src/tray/main.cpp)
-target_link_libraries(air_companion_tray PRIVATE air_companion_core)
+    add_executable(air_companion_tray src/tray/main.cpp)
+    target_link_libraries(air_companion_tray PRIVATE air_companion_core)
 
-add_executable(air_companion_helper src/helper/main.cpp)
-target_link_libraries(air_companion_helper PRIVATE air_companion_core)
+    add_executable(air_companion_helper src/helper/main.cpp)
+    target_link_libraries(air_companion_helper PRIVATE air_companion_core)
 
-add_executable(air_companion_updater src/updater/main.cpp)
-target_link_libraries(air_companion_updater PRIVATE air_companion_core)
+    add_executable(air_companion_updater src/updater/main.cpp)
+    target_link_libraries(air_companion_updater PRIVATE air_companion_core)
+endif()
+
+if(UNIX AND NOT APPLE)
+    add_executable(
+        air_companion_linux_screenshot
+        src/linux_screenshot_service/main.cpp
+        src/adapters/linux/LinuxScreenCaptureAdapter.cpp
+    )
+    target_link_libraries(air_companion_linux_screenshot PRIVATE air_companion_core)
+endif()
 
 add_executable(air_companion_tests tests/CompanionTests.cpp tests/FakePushUpCounterAdapter.cpp tests/FakeCompanionApiClient.cpp)
 target_link_libraries(air_companion_tests PRIVATE air_companion_core)

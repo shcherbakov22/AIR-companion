@@ -1,0 +1,14 @@
+[Unit]
+Description=AIR Companion Linux Screenshot Capture
+After=graphical-session.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/AIRCompanion/linux-screenshot.env
+ExecStart=%h/.local/bin/air_companion_linux_screenshot
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

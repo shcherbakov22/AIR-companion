@@ -10,6 +10,7 @@
 #endif
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -363,14 +364,173 @@ std::string basenameFromPath(const std::string& path) {
 
 }  // namespace
 
+#ifndef _WIN32
+std::string shellQuote(const std::string& value) {
+    std::string quoted = "'";
+    for (const char ch : value) {
+        if (ch == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += ch;
+        }
+    }
+    quoted += "'";
+    return quoted;
+}
+
+std::filesystem::path temporaryPath(const std::string& suffix) {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now).count();
+    return std::filesystem::temp_directory_path() / ("air-companion-http-" + std::to_string(micros) + suffix);
+}
+
+bool shouldAllowInvalidCertificate(const HttpRequestOptions& options) {
+    if (options.allowInvalidCertificate) {
+        return true;
+    }
+
+    const auto* strictTls = std::getenv("AIR_COMPANION_STRICT_TLS");
+    return strictTls == nullptr || std::string(strictTls) != "1";
+}
+
+std::string curlBaseArgs(const HttpRequestOptions& options) {
+    std::string args = "curl -sS -L --connect-timeout 10 --max-time 30";
+    if (shouldAllowInvalidCertificate(options)) {
+        args += " -k";
+    }
+    return args;
+}
+
+std::string curlHeaderArgs(const std::map<std::string, std::string>& headers, bool includeContentType = true) {
+    std::string args;
+    for (const auto& [name, value] : headers) {
+        if (!includeContentType && name == "Content-Type") {
+            continue;
+        }
+        args += " -H " + shellQuote(name + ": " + value);
+    }
+    return args;
+}
+
+std::optional<int> readStatusCode(const std::filesystem::path& path) {
+    std::ifstream input(path);
+    if (!input.is_open()) {
+        return std::nullopt;
+    }
+
+    int statusCode = 0;
+    input >> statusCode;
+    if (!input.good() && !input.eof()) {
+        return std::nullopt;
+    }
+    return statusCode;
+}
+
+std::string readTextFile(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        return {};
+    }
+
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    return buffer.str();
+}
+
+HttpResponse sendCurlRequest(const std::string& method,
+                             const std::string& url,
+                             const std::map<std::string, std::string>& headers,
+                             const std::string& body,
+                             const HttpRequestOptions& options) {
+    const auto responsePath = temporaryPath(".response");
+    const auto statusPath = temporaryPath(".status");
+    const auto requestPath = temporaryPath(".request");
+
+    if (!body.empty()) {
+        std::ofstream request(requestPath, std::ios::binary | std::ios::trunc);
+        if (!request.is_open()) {
+            return {};
+        }
+        request.write(body.data(), static_cast<std::streamsize>(body.size()));
+        if (!request.good()) {
+            return {};
+        }
+    }
+
+    std::string command = curlBaseArgs(options)
+        + " -X " + shellQuote(method)
+        + curlHeaderArgs(headers)
+        + " -o " + shellQuote(responsePath.string())
+        + " -w " + shellQuote("%{http_code}");
+
+    if (!body.empty()) {
+        command += " --data-binary @" + shellQuote(requestPath.string());
+    }
+
+    command += " " + shellQuote(url) + " > " + shellQuote(statusPath.string());
+
+    const auto result = std::system(command.c_str());
+    HttpResponse response;
+    if (result == 0) {
+        response.statusCode = readStatusCode(statusPath).value_or(0);
+        response.body = readTextFile(responsePath);
+    }
+
+    std::error_code errorCode;
+    std::filesystem::remove(responsePath, errorCode);
+    std::filesystem::remove(statusPath, errorCode);
+    std::filesystem::remove(requestPath, errorCode);
+    return response;
+}
+
+HttpResponse sendCurlMultipart(const std::string& url,
+                               const std::map<std::string, std::string>& headers,
+                               const std::map<std::string, std::string>& fields,
+                               const std::string& fileFieldName,
+                               const std::string& filePath,
+                               const std::string& contentType,
+                               const HttpRequestOptions& options) {
+    std::error_code errorCode;
+    if (!std::filesystem::exists(filePath, errorCode) || std::filesystem::file_size(filePath, errorCode) == 0) {
+        return {};
+    }
+
+    const auto responsePath = temporaryPath(".response");
+    const auto statusPath = temporaryPath(".status");
+
+    std::string command = curlBaseArgs(options)
+        + curlHeaderArgs(headers, false)
+        + " -o " + shellQuote(responsePath.string())
+        + " -w " + shellQuote("%{http_code}");
+
+    for (const auto& [name, value] : fields) {
+        command += " -F " + shellQuote(name + "=" + value);
+    }
+
+    command += " -F " + shellQuote(fileFieldName + "=@" + filePath + ";type=" + contentType)
+        + " " + shellQuote(url)
+        + " > " + shellQuote(statusPath.string());
+
+    const auto result = std::system(command.c_str());
+    HttpResponse response;
+    if (result == 0) {
+        response.statusCode = readStatusCode(statusPath).value_or(0);
+        response.body = readTextFile(responsePath);
+    }
+
+    std::filesystem::remove(responsePath, errorCode);
+    std::filesystem::remove(statusPath, errorCode);
+    return response;
+}
+#endif
+
 HttpResponse HttpClient::get(const std::string& url,
                              const std::map<std::string, std::string>& headers,
                              const HttpRequestOptions& options) const {
 #ifdef _WIN32
     return sendRequest(L"GET", url, headers, {}, options);
 #else
-    (void)options;
-    return HttpResponse{200, "{\"stub\":true,\"url\":\"" + url + "\"}"};
+    return sendCurlRequest("GET", url, headers, {}, options);
 #endif
 }
 
@@ -381,8 +541,7 @@ HttpResponse HttpClient::post(const std::string& url,
 #ifdef _WIN32
     return sendRequest(L"POST", url, headers, body, options);
 #else
-    (void)options;
-    return HttpResponse{200, "{\"stub\":true,\"url\":\"" + url + "\",\"body\":\"" + body + "\"}"};
+    return sendCurlRequest("POST", url, headers, body, options);
 #endif
 }
 
@@ -417,14 +576,7 @@ HttpResponse HttpClient::postMultipart(const std::string& url,
     multipartHeaders["Content-Type"] = "multipart/form-data; boundary=" + boundary;
     return sendRequest(L"POST", url, multipartHeaders, body.str(), options);
 #else
-    (void)url;
-    (void)headers;
-    (void)fields;
-    (void)fileFieldName;
-    (void)filePath;
-    (void)contentType;
-    (void)options;
-    return {200, "{}"};
+    return sendCurlMultipart(url, headers, fields, fileFieldName, filePath, contentType, options);
 #endif
 }
 
@@ -443,24 +595,33 @@ bool HttpClient::downloadToFile(const std::string& url,
 
     return false;
 #else
-    const auto response = get(url, headers, options);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-        return false;
-    }
-
     std::error_code errorCode;
     std::filesystem::create_directories(std::filesystem::path(filePath).parent_path(), errorCode);
     if (errorCode) {
         return false;
     }
 
-    std::ofstream output(filePath, std::ios::binary | std::ios::trunc);
-    if (!output.is_open()) {
+    const auto partialPath = std::filesystem::path(filePath).string() + ".download";
+    const auto statusPath = temporaryPath(".status");
+    std::filesystem::remove(partialPath, errorCode);
+
+    const auto command = curlBaseArgs(options)
+        + curlHeaderArgs(headers)
+        + " -f -o " + shellQuote(partialPath)
+        + " -w " + shellQuote("%{http_code}")
+        + " " + shellQuote(url)
+        + " > " + shellQuote(statusPath.string());
+
+    const auto result = std::system(command.c_str());
+    const auto statusCode = readStatusCode(statusPath).value_or(0);
+    std::filesystem::remove(statusPath, errorCode);
+    if (result != 0 || statusCode < 200 || statusCode >= 300) {
+        std::filesystem::remove(partialPath, errorCode);
         return false;
     }
 
-    output.write(response.body.data(), static_cast<std::streamsize>(response.body.size()));
-    return output.good();
+    std::filesystem::rename(partialPath, filePath, errorCode);
+    return !errorCode;
 #endif
 }
 

@@ -130,11 +130,22 @@ void hidePathOnWindows(const std::string& path) {
 }
 
 std::string defaultCaptureBaseDirectory() {
+#ifdef _WIN32
     if (const auto* programData = std::getenv("PROGRAMDATA"); programData != nullptr && *programData != '\0') {
-        return std::string(programData) + "\\AIRCompanion\\Captures";
+        return (std::filesystem::path(programData) / "AIRCompanion" / "Captures").string();
     }
 
-    return ".\\AIRCompanion\\Captures";
+    return (std::filesystem::path(".") / "AIRCompanion" / "Captures").string();
+#else
+    if (const auto* stateHome = std::getenv("XDG_STATE_HOME"); stateHome != nullptr && *stateHome != '\0') {
+        return (std::filesystem::path(stateHome) / "AIRCompanion" / "Captures").string();
+    }
+    if (const auto* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        return (std::filesystem::path(home) / ".local" / "state" / "AIRCompanion" / "Captures").string();
+    }
+
+    return (std::filesystem::path(".") / "AIRCompanion" / "Captures").string();
+#endif
 }
 
 std::string normalizeOutputDirectory(const std::string& configuredPath) {
@@ -224,15 +235,26 @@ bool CaptureSettingsStore::save(const InternalCaptureSettings& settings) const {
 }
 
 std::string CaptureSettingsStore::settingsPath() const {
-    return settingsDirectory() + "\\capture-settings.json";
+    return (std::filesystem::path(settingsDirectory()) / "capture-settings.json").string();
 }
 
 std::string CaptureSettingsStore::settingsDirectory() {
+#ifdef _WIN32
     if (const auto* programData = std::getenv("PROGRAMDATA"); programData != nullptr && *programData != '\0') {
-        return std::string(programData) + "\\AIRCompanion\\Internal";
+        return (std::filesystem::path(programData) / "AIRCompanion" / "Internal").string();
     }
 
-    return ".\\AIRCompanion\\Internal";
+    return (std::filesystem::path(".") / "AIRCompanion" / "Internal").string();
+#else
+    if (const auto* stateHome = std::getenv("XDG_STATE_HOME"); stateHome != nullptr && *stateHome != '\0') {
+        return (std::filesystem::path(stateHome) / "AIRCompanion").string();
+    }
+    if (const auto* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        return (std::filesystem::path(home) / ".local" / "state" / "AIRCompanion").string();
+    }
+
+    return (std::filesystem::path(".") / "AIRCompanion").string();
+#endif
 }
 
 }  // namespace companion::service
