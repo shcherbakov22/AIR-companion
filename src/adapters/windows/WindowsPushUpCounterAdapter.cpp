@@ -8,18 +8,21 @@
 #endif
 
 #include <chrono>
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace companion::adapters::windows {
 
 namespace {
 constexpr int kBaudRate = 115200;
 constexpr auto kScanInterval = std::chrono::seconds(5);
-constexpr auto kProbeTimeout = std::chrono::milliseconds(2200);
+constexpr auto kProbeTimeout = std::chrono::milliseconds(8500);
 constexpr auto kLaunchPumpDuration = std::chrono::milliseconds(2500);
 
 bool pushUpTestModeEnabled() {
@@ -127,6 +130,48 @@ bool isFirmwareFrame(const std::string& line) {
         || line.rfind("SET ", 0) == 0
         || line.rfind("DIST ", 0) == 0;
 }
+
+int comPortNumber(const std::string& port) {
+    if (port.size() <= 3 || port.rfind("COM", 0) != 0) {
+        return 0;
+    }
+
+    for (std::size_t index = 3; index < port.size(); ++index) {
+        if (!std::isdigit(static_cast<unsigned char>(port[index]))) {
+            return 0;
+        }
+    }
+
+    return std::atoi(port.substr(3).c_str());
+}
+
+std::vector<std::string> enumerateComPorts() {
+    std::vector<std::string> ports;
+    std::vector<char> buffer(32768, '\0');
+    const DWORD length = QueryDosDeviceA(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length > 0) {
+        const char* cursor = buffer.data();
+        while (*cursor != '\0') {
+            std::string name(cursor);
+            if (comPortNumber(name) > 0) {
+                ports.push_back(std::move(name));
+            }
+            cursor += name.size() + 1;
+        }
+    }
+
+    if (ports.empty()) {
+        for (int index = 1; index <= 256; ++index) {
+            ports.push_back("COM" + std::to_string(index));
+        }
+    }
+
+    std::sort(ports.begin(), ports.end(), [](const std::string& left, const std::string& right) {
+        return comPortNumber(left) < comPortNumber(right);
+    });
+    ports.erase(std::unique(ports.begin(), ports.end()), ports.end());
+    return ports;
+}
 #endif
 
 }  // namespace
@@ -222,8 +267,7 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
     }
     m_lastScanAt = now;
 
-    for (int index = 1; index <= 32; ++index) {
-        const std::string port = "COM" + std::to_string(index);
+    for (const std::string& port : enumerateComPorts()) {
         HANDLE candidate = CreateFileA(
             portPath(port).c_str(),
             GENERIC_READ | GENERIC_WRITE,
@@ -239,11 +283,13 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
         }
 
         if (!configureSerialPort(candidate)) {
+            appendDebugLog("push-up counter probe configure failed on " + port);
             CloseHandle(candidate);
             continue;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+        appendDebugLog("push-up counter probing " + port);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
         const std::string ping = "PING\n";
         DWORD bytesWritten = 0;
         WriteFile(candidate, ping.data(), static_cast<DWORD>(ping.size()), &bytesWritten, nullptr);
@@ -274,6 +320,7 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
         }
 
         if (!matched) {
+            appendDebugLog("push-up counter probe no firmware response on " + port);
             CloseHandle(candidate);
             continue;
         }

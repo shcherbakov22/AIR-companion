@@ -22,7 +22,13 @@ DEVICE = "/dev/ttyUSB0"
 def open_serial():
     fd = os.open(DEVICE, os.O_RDWR | os.O_NOCTTY)
     attrs = termios.tcgetattr(fd)
+    attrs[0] = 0
+    attrs[1] = 0
+    attrs[2] &= ~(termios.PARENB | termios.CSTOPB | termios.CSIZE)
+    attrs[2] |= termios.CLOCAL | termios.CREAD | termios.CS8
     attrs[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)
+    attrs[4] = termios.B115200
+    attrs[5] = termios.B115200
     attrs[6][termios.VMIN] = 0
     attrs[6][termios.VTIME] = 2
     termios.tcsetattr(fd, termios.TCSANOW, attrs)
@@ -38,6 +44,24 @@ def drain(fd, timeout=0.5):
             os.read(fd, 256)
         except OSError:
             break
+
+def wait_for_boot(fd, timeout=8.0):
+    lines = []
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r, _, _ = select.select([fd], [], [], 0.05)
+        if not r:
+            continue
+
+        data = os.read(fd, 256)
+        for l in data.decode(errors='replace').split('\n'):
+            s = l.strip()
+            if s and not s.startswith('DIST'):
+                lines.append(s)
+                if s.startswith('HELLO') or s.startswith('STATE '):
+                    return lines
+
+    return lines
 
 def cmd(fd, cmd_str, timeout=1.0, skip_dist=True):
     """Send command, return non-DIST responses within timeout."""
@@ -85,7 +109,9 @@ def main():
 
     print(f"Opening {DEVICE}")
     fd = open_serial()
-    drain(fd, timeout=1.0)
+    boot = wait_for_boot(fd, timeout=8.0)
+    if boot:
+        print(f"Boot: {boot}")
     drain(fd, timeout=0.5)
 
     results = []
