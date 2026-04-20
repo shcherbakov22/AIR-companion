@@ -27,7 +27,7 @@ private:
     void ensureSessionClaimed();
     void ensureSessionLaunched();
     void syncProgress();
-    void syncCompletion();
+    bool syncCompletion();
     void failActiveSession(const std::string& notes);
 
     const networking::CompanionApiClient& m_apiClient;

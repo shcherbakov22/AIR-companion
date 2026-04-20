@@ -9,7 +9,7 @@ namespace companion::core {
 
 namespace {
 constexpr auto kHeartbeatInterval = std::chrono::seconds(5);
-constexpr auto kSessionIdleTimeout = std::chrono::seconds(60);
+constexpr auto kSessionIdleTimeout = std::chrono::seconds(30);
 
 void appendDebugLog(const std::string& line) {
     const char* appData = std::getenv("APPDATA");
@@ -57,11 +57,16 @@ void PushUpStationCoordinator::tick() {
         return;
     }
 
+    // Completion resolves the linked violation server-side, so send it before
+    // lower-priority heartbeat/progress work that can otherwise delay removal.
+    const bool completionAttempted = syncCompletion();
     syncHeartbeat();
     ensureSessionClaimed();
     ensureSessionLaunched();
     syncProgress();
-    syncCompletion();
+    if (!completionAttempted) {
+        syncCompletion();
+    }
 
     if (m_session.has_value()) {
         const auto state = m_adapter.state();
@@ -106,8 +111,16 @@ void PushUpStationCoordinator::syncHeartbeat() {
             appendDebugLog("push-up heartbeat current session: " + result->currentSession->id + " status=" + result->currentSession->status);
         }
         m_session = result->currentSession;
-    } else if (m_session.has_value() && m_session->status == "completed") {
+    } else if (m_session.has_value()) {
+        appendDebugLog("push-up heartbeat cleared local stale session: " + m_session->id);
+        if (!m_launchedSessionId.empty() && m_adapter.state().connected) {
+            (void) m_adapter.abortSession(m_session->id);
+        }
         m_session.reset();
+        m_launchedSessionId.clear();
+        m_startSynced = false;
+        m_lastProgressRep = 0;
+        m_lastMeaningfulActivityAt = {};
     }
 }
 
@@ -179,17 +192,18 @@ void PushUpStationCoordinator::syncProgress() {
     }
 }
 
-void PushUpStationCoordinator::syncCompletion() {
+bool PushUpStationCoordinator::syncCompletion() {
     if (!m_session.has_value() || m_launchedSessionId != m_session->id) {
-        return;
+        return false;
     }
 
-    if (!m_adapter.consumeCompletion()) {
-        return;
+    if (!m_adapter.state().completionPending) {
+        return false;
     }
 
     appendDebugLog("push-up completion pending: " + m_session->id);
     if (m_apiClient.pushUpStationComplete(m_deviceToken, m_stationKey, m_session->id)) {
+        (void) m_adapter.consumeCompletion();
         appendDebugLog("push-up completion sync ok: " + m_session->id);
         m_session.reset();
         m_launchedSessionId.clear();
@@ -199,6 +213,8 @@ void PushUpStationCoordinator::syncCompletion() {
     } else {
         appendDebugLog("push-up completion sync failed: " + m_session->id);
     }
+
+    return true;
 }
 
 void PushUpStationCoordinator::failActiveSession(const std::string& notes) {
@@ -207,6 +223,10 @@ void PushUpStationCoordinator::failActiveSession(const std::string& notes) {
     }
 
     appendDebugLog("push-up session fail: " + m_session->id + " notes=" + notes);
+    if (!m_launchedSessionId.empty() && m_adapter.state().connected) {
+        (void) m_adapter.abortSession(m_session->id);
+        m_adapter.hardReset();
+    }
     (void) m_apiClient.pushUpStationFail(m_deviceToken, m_stationKey, m_session->id, notes);
     m_session.reset();
     m_launchedSessionId.clear();

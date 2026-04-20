@@ -196,6 +196,9 @@ models::DeviceCommandType parseCommandType(const std::string& type) {
     if (type == "request_camera_capture") {
         return models::DeviceCommandType::RequestCameraCapture;
     }
+    if (type == "show_message") {
+        return models::DeviceCommandType::ShowMessage;
+    }
     if (type == "lock_internet") {
         return models::DeviceCommandType::LockInternet;
     }
@@ -269,6 +272,11 @@ std::optional<models::DevicePolicy> parsePolicyResponse(const std::string& respo
 
         if (const auto violations = jsonObjectString(*policyBody, "violations"); violations.has_value()) {
             policy.hasOpenViolations = jsonIntValue(*violations, "open_count").value_or(0) > 0;
+        }
+
+        if (const auto violationAppEnforcement = jsonObjectString(*policyBody, "violation_app_enforcement"); violationAppEnforcement.has_value()) {
+            policy.violationAppEnforcement.killGuiApps = jsonBoolValue(*violationAppEnforcement, "kill_gui_apps").value_or(false);
+            policy.violationAppEnforcement.browserReopenGraceSeconds = jsonIntValue(*violationAppEnforcement, "browser_reopen_grace_seconds").value_or(60);
         }
 
         if (const auto capture = jsonObjectString(*policyBody, "capture"); capture.has_value()) {

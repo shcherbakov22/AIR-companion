@@ -47,6 +47,53 @@ function Update-ServiceConfiguration {
     }
 }
 
+function Get-ServiceDiagnostics {
+    param(
+        [string]$ServiceName
+    )
+
+    $statusLine = ''
+    $win32ExitLine = ''
+    $serviceExitLine = ''
+    $binaryPathLine = ''
+
+    try {
+        $queryOutput = sc.exe queryex $ServiceName 2>&1
+        foreach ($line in $queryOutput) {
+            if ($line -match 'STATE\s*:\s*\d+\s+(.+)$') {
+                $statusLine = $Matches[1].Trim()
+            } elseif ($line -match 'WIN32_EXIT_CODE\s*:\s*\d+\s+\((.+)\)$') {
+                $win32ExitLine = $Matches[1].Trim()
+            } elseif ($line -match 'SERVICE_EXIT_CODE\s*:\s*\d+\s+\((.+)\)$') {
+                $serviceExitLine = $Matches[1].Trim()
+            }
+        }
+    } catch {
+    }
+
+    try {
+        $serviceInstance = Get-CimInstance -ClassName Win32_Service -Filter "Name='$ServiceName'" -ErrorAction Stop
+        $binaryPathLine = $serviceInstance.PathName
+    } catch {
+    }
+
+    $parts = @()
+    if ($statusLine) {
+        $parts += "state=$statusLine"
+    }
+    if ($win32ExitLine) {
+        $parts += "win32_exit=$win32ExitLine"
+    }
+    if ($serviceExitLine) {
+        $parts += "service_exit=$serviceExitLine"
+    }
+    if ($binaryPathLine) {
+        $parts += "path=$binaryPathLine"
+    }
+
+    return ($parts -join '; ')
+}
+
 function Ensure-ServiceWatchdogTasks {
     param(
         [string]$ServiceName
@@ -96,7 +143,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     New-Item -ItemType Directory -Force -Path $stagedBundleDirectory | Out-Null
 
     $sourceBundleDirectory = Split-Path -Parent $PSCommandPath
-    foreach ($payloadName in @('install-companion.ps1', 'air_companion_service.exe', 'air_companion_tray.exe', 'air_companion_updater.exe')) {
+    foreach ($payloadName in @('install-companion.ps1', 'air_companion_service.exe', 'air_companion_tray.exe', 'air_companion_helper.exe', 'air_companion_updater.exe')) {
         $sourcePath = Join-Path $sourceBundleDirectory $payloadName
         if (-not (Test-Path $sourcePath)) {
             throw "Missing installer payload file: $sourcePath"
@@ -151,13 +198,14 @@ try {
     $bundleDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
     $serviceBinary = Join-Path $bundleDirectory 'air_companion_service.exe'
     $utilityBinary = Join-Path $bundleDirectory 'air_companion_tray.exe'
+    $helperBinary = Join-Path $bundleDirectory 'air_companion_helper.exe'
     $updaterBinary = Join-Path $bundleDirectory 'air_companion_updater.exe'
     $serviceName = 'AIRCompanion'
 
     New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
     Start-Transcript -Path $logPath -Append | Out-Null
 
-    foreach ($path in @($serviceBinary, $utilityBinary, $updaterBinary)) {
+    foreach ($path in @($serviceBinary, $utilityBinary, $helperBinary, $updaterBinary)) {
         if (-not (Test-Path $path)) {
             throw "Missing installer payload file: $path"
         }
@@ -173,12 +221,14 @@ try {
 
     Copy-Item -Path $serviceBinary -Destination (Join-Path $InstallDirectory 'air_companion_service.exe') -Force
     Copy-Item -Path $utilityBinary -Destination (Join-Path $InstallDirectory 'air_companion_tray.exe') -Force
+    Copy-Item -Path $helperBinary -Destination (Join-Path $InstallDirectory 'air_companion_helper.exe') -Force
     Copy-Item -Path $updaterBinary -Destination (Join-Path $InstallDirectory 'air_companion_updater.exe') -Force
 
     $installedServiceBinary = Join-Path $InstallDirectory 'air_companion_service.exe'
+    $quotedInstalledServiceBinary = '"' + $installedServiceBinary + '"'
     $serviceExists = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
     if ($null -eq $serviceExists) {
-        New-Service -Name $serviceName -BinaryPathName $installedServiceBinary -DisplayName 'AIR Companion' -StartupType Automatic | Out-Null
+        New-Service -Name $serviceName -BinaryPathName $quotedInstalledServiceBinary -DisplayName 'AIR Companion' -StartupType Automatic | Out-Null
     } else {
         Update-ServiceConfiguration -ServiceName $serviceName -BinaryPath $installedServiceBinary
     }
@@ -205,6 +255,11 @@ try {
         }
 
         Start-Sleep -Seconds 1
+    }
+
+    $diagnostics = Get-ServiceDiagnostics -ServiceName $serviceName
+    if ($diagnostics) {
+        throw "AIR Companion service failed to start. $diagnostics. See $logPath"
     }
 
     throw "AIR Companion service failed to start. See $logPath"

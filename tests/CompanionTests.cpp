@@ -1,5 +1,8 @@
 #include "companion/core/CaptureScheduler.h"
+#include "companion/core/EnforcementCoordinator.h"
+#include "companion/models/ActivitySnapshot.h"
 #include "companion/core/PushUpStationCoordinator.h"
+#include "companion/adapters/IEnforcementAdapter.h"
 #include "companion/models/DevicePolicy.h"
 #include "companion/models/PushUpStationSession.h"
 #include "companion/networking/CompanionApiParsers.h"
@@ -23,6 +26,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -140,6 +144,46 @@ private:
     fs::path m_path;
 };
 
+class RecordingEnforcementAdapter final : public companion::adapters::IEnforcementAdapter {
+public:
+    void applyPolicy(const companion::models::DevicePolicy& policy, const companion::models::ActivitySnapshot& snapshot) override {
+        applyCallCount += 1;
+        lastPolicy = policy;
+        lastSnapshot = snapshot;
+    }
+
+    void terminateBlockedApps(const std::vector<std::string>& blockedApps) override {
+        terminatedBlockedApps = blockedApps;
+    }
+
+    bool showMessage(const std::string& title, const std::string& body, int displaySeconds, std::string& error) override {
+        lastMessageTitle = title;
+        lastMessageBody = body;
+        lastDisplaySeconds = displaySeconds;
+        showMessageCallCount += 1;
+        if (!messageShouldSucceed) {
+            error = "message display failed";
+            return false;
+        }
+        error.clear();
+        return true;
+    }
+
+    std::string describeState() const override {
+        return "recording";
+    }
+
+    int applyCallCount{0};
+    companion::models::DevicePolicy lastPolicy{};
+    companion::models::ActivitySnapshot lastSnapshot{};
+    std::vector<std::string> terminatedBlockedApps;
+    int showMessageCallCount{0};
+    int lastDisplaySeconds{0};
+    bool messageShouldSucceed{true};
+    std::string lastMessageTitle;
+    std::string lastMessageBody;
+};
+
 // ---------------------------------------------------------------------------
 // CompanionApiParsers — enrollment edge cases
 // ---------------------------------------------------------------------------
@@ -253,6 +297,23 @@ void testParsePolicyResponseViolationOpenCountPositive() {
     const auto result = companion::networking::parsePolicyResponse(body);
     require(result.has_value(), "should parse");
     require(result->hasOpenViolations, "hasOpenViolations should be true when open_count > 0");
+}
+
+void testParsePolicyResponseViolationAppEnforcement() {
+    const auto body = R"({
+        "policy_hash": "h6",
+        "policy": {
+            "capture": {},
+            "violation_app_enforcement": {
+                "kill_gui_apps": true,
+                "browser_reopen_grace_seconds": 60
+            }
+        }
+    })";
+    const auto result = companion::networking::parsePolicyResponse(body);
+    require(result.has_value(), "should parse");
+    require(result->violationAppEnforcement.killGuiApps, "kill_gui_apps should parse");
+    requireEqual(result->violationAppEnforcement.browserReopenGraceSeconds, 60, "browser grace should parse");
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +721,55 @@ void testParseRemoteControlCommandTypes() {
     require(stopCommands.front().type == companion::models::DeviceCommandType::StopRemoteControl, "stop remote command type");
 }
 
+void testParseShowMessageCommandType() {
+    const auto commands = companion::networking::parseCommandResponse(R"({
+        "accepted": true,
+        "command": {
+            "id": 33,
+            "command_type": "show_message",
+            "status": "pending",
+            "payload": {
+                "title": "Mentor message",
+                "body": "Come back to the task.",
+                "display_seconds": 20
+            }
+        }
+    })");
+    requireEqual(commands.size(), static_cast<std::size_t>(1), "show message command count");
+    require(commands.front().type == companion::models::DeviceCommandType::ShowMessage, "show message command type");
+}
+
+void testEnforcementCoordinatorShowMessageCommand() {
+    RecordingEnforcementAdapter adapter;
+    companion::core::EnforcementCoordinator coordinator(adapter);
+
+    companion::models::DeviceCommand command;
+    command.type = companion::models::DeviceCommandType::ShowMessage;
+    command.payloadJson = R"({"title":"Mentor message","body":"Look at the board now.","display_seconds":18})";
+
+    const auto result = coordinator.applyCommand(command);
+    require(result.success, "show message should succeed");
+    requireEqual(result.output, std::string("message displayed"), "show message output");
+    requireEqual(adapter.showMessageCallCount, 1, "show message call count");
+    requireEqual(adapter.lastMessageTitle, std::string("Mentor message"), "message title");
+    requireEqual(adapter.lastMessageBody, std::string("Look at the board now."), "message body");
+    requireEqual(adapter.lastDisplaySeconds, 18, "message duration");
+}
+
+void testEnforcementCoordinatorShowMessageCommandRequiresBody() {
+    RecordingEnforcementAdapter adapter;
+    companion::core::EnforcementCoordinator coordinator(adapter);
+
+    companion::models::DeviceCommand command;
+    command.type = companion::models::DeviceCommandType::ShowMessage;
+    command.payloadJson = R"({"title":"Mentor message"})";
+
+    const auto result = coordinator.applyCommand(command);
+    require(!result.success, "show message without body should fail");
+    requireEqual(result.output, std::string("message body missing"), "missing body output");
+    requireEqual(adapter.showMessageCallCount, 0, "show message should not execute");
+}
+
 void testCompanionConfigStoreRoundTrip() {
     ScopedTempDir tempDir;
     ScopedEnvVar appData("APPDATA", tempDir.path().string());
@@ -810,6 +920,30 @@ void testUpdateCoordinatorVersionComparison() {
     require(companion::service::UpdateCoordinator::isNewerVersion("0.2.0", "0.1.9"), "minor version should be newer");
     require(!companion::service::UpdateCoordinator::isNewerVersion("0.1.0", "0.1.0"), "same version should not be newer");
     require(!companion::service::UpdateCoordinator::isNewerVersion("0.1.0", "0.1.1"), "older version should not be newer");
+    require(companion::service::UpdateCoordinator::isNewerVersion("0.1.13-beta", "0.1.12"), "pre-release suffix should not break numeric comparison");
+    require(!companion::service::UpdateCoordinator::isNewerVersion("not-a-version", "0.1.12"), "invalid candidate version should not throw or compare newer");
+}
+
+void testEnforcementCoordinatorPassesSnapshotToAdapter() {
+    RecordingEnforcementAdapter adapter;
+    companion::core::EnforcementCoordinator coordinator(adapter);
+
+    companion::models::DevicePolicy policy;
+    policy.blockedApps = {"Discord.exe"};
+    policy.violationAppEnforcement.killGuiApps = true;
+
+    companion::models::ActivitySnapshot snapshot;
+    snapshot.focusedApp = "chrome.exe";
+    snapshot.openApps.push_back({.appName = "chrome.exe", .windowTitle = "Docs"});
+
+    coordinator.applyPolicy(policy, snapshot);
+
+    requireEqual(adapter.applyCallCount, 1, "applyPolicy should be called once");
+    requireEqual(adapter.lastSnapshot.focusedApp, std::string("chrome.exe"), "snapshot should be forwarded");
+    requireEqual(adapter.lastSnapshot.openApps.size(), static_cast<std::size_t>(1), "open apps should be forwarded");
+    require(adapter.lastPolicy.violationAppEnforcement.killGuiApps, "policy should be forwarded");
+    requireEqual(adapter.terminatedBlockedApps.size(), static_cast<std::size_t>(1), "blocked apps should still be terminated");
+    requireEqual(adapter.terminatedBlockedApps.front(), std::string("Discord.exe"), "blocked app should match");
 }
 
 void testPushUpCoordinatorClaimsSessionOnStartup() {
@@ -982,6 +1116,61 @@ void testPushUpCoordinatorSyncsCompletionOnFinish() {
     require(foundComplete, "coordinator should call pushUpStationComplete when session finishes");
 }
 
+void testPushUpCoordinatorRetriesCompletionAfterApiFailure() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev123";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-complete-retry";
+    session.requiredPushUps = 1;
+    session.dropThreshold = 5;
+    session.upGap = 100;
+    session.downTolerance = 200;
+    session.status = "in_progress";
+
+    api.setClaimNextResponse(session);
+    api.setStartResponse(true);
+    api.setProgressResponse(true);
+    api.setCompleteResponse(false);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+
+    coordinator.tick();
+    coordinator.tick();
+    adapter.simulateRepIncrement(1, 1);
+    coordinator.tick();
+
+    int completeCalls = 0;
+    for (const auto& call : api.calls()) {
+        if (call.kind == PushUpStationApiCall::Kind::Complete) {
+            ++completeCalls;
+        }
+    }
+    requireEqual(completeCalls, 1, "completion should be attempted once after first finish");
+    require(adapter.completionPending(), "completion flag should remain pending when complete sync fails");
+
+    api.setCompleteResponse(true);
+    coordinator.tick();
+
+    completeCalls = 0;
+    for (const auto& call : api.calls()) {
+        if (call.kind == PushUpStationApiCall::Kind::Complete) {
+            ++completeCalls;
+        }
+    }
+    requireEqual(completeCalls, 2, "completion should retry on a later tick after failure");
+    require(!adapter.completionPending(), "completion flag should clear after successful completion sync");
+}
+
 void testPushUpCoordinatorFailsSessionOnDisconnect() {
     using namespace companion;
     using namespace companion::core;
@@ -1027,6 +1216,88 @@ void testPushUpCoordinatorFailsSessionOnDisconnect() {
     require(foundFail, "coordinator should call pushUpStationFail when adapter disconnects with active session");
 }
 
+void testPushUpCoordinatorAbortsHardwareWhenTimingOutSession() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev-timeout";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-timeout";
+    session.requiredPushUps = 10;
+    session.dropThreshold = 5;
+    session.upGap = 100;
+    session.downTolerance = 200;
+    session.status = "in_progress";
+
+    api.setClaimNextResponse(session);
+    api.setStartResponse(true);
+    api.setFailResponse(true);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+
+    coordinator.tick();
+    coordinator.tick();
+    adapter.processLine("STATE IDLE");
+    std::this_thread::sleep_for(std::chrono::seconds(31));
+    coordinator.tick();
+
+    requireEqual(adapter.abortCount(), 1, "coordinator should abort the local hardware session when timing out");
+    requireEqual(adapter.hardResetCount(), 1, "coordinator should hard reset local hardware when timing out");
+}
+
+void testPushUpCoordinatorClearsStaleSessionWhenHeartbeatStopsReturningIt() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev-stale";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-stale";
+    session.requiredPushUps = 5;
+    session.dropThreshold = 5;
+    session.upGap = 100;
+    session.downTolerance = 200;
+    session.status = "in_progress";
+
+    networking::PushUpStationHeartbeatResult heartbeat;
+    heartbeat.accepted = true;
+    heartbeat.pendingCount = 0;
+    heartbeat.currentSession = session;
+    api.setHeartbeatResponse(heartbeat);
+    api.setStartResponse(true);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+
+    coordinator.tick();
+    coordinator.tick();
+
+    networking::PushUpStationHeartbeatResult heartbeatWithoutSession;
+    heartbeatWithoutSession.accepted = true;
+    heartbeatWithoutSession.pendingCount = 0;
+    heartbeatWithoutSession.currentSession.reset();
+    api.setHeartbeatResponse(heartbeatWithoutSession);
+
+    std::this_thread::sleep_for(std::chrono::seconds(6));
+    coordinator.tick();
+
+    requireEqual(adapter.abortCount(), 1, "coordinator should abort stale local session when heartbeat no longer returns it");
+}
+
 void testPushUpAdapterStateTransitions() {
     using namespace companion;
     using namespace companion::test;
@@ -1063,6 +1334,20 @@ void testPushUpAdapterStateTransitions() {
     adapter.abortSession("sess1");
     requireEqual(adapter.state().currentRep, 0, "currentRep should reset on abortSession");
     requireEqual(adapter.state().status, std::string("idle"), "status should be idle after abort");
+}
+
+void testPushUpAdapterRequiresStartAcknowledgement() {
+    using namespace companion;
+    using namespace companion::test;
+
+    FakePushUpCounterAdapter adapter;
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+    adapter.setAutoStartAck(false);
+
+    const bool started = adapter.startSession("sess-no-ack", 10, 5, 100, 200);
+    require(!started, "startSession should fail if the firmware never acknowledges workout start");
+    requireEqual(adapter.state().status, std::string("ready"), "status should remain ready when no acknowledgement is observed");
 }
 
 void testPushUpAdapterTestModePumpsFullSequence() {
@@ -1156,6 +1441,7 @@ int main() {
         {"parsePolicyResponse",                        testParsePolicyResponse},
         {"parseCommandResponseSupportsNumericIds",     testParseCommandResponseSupportsNumericIds},
         {"parseRemoteControlCommandTypes",             testParseRemoteControlCommandTypes},
+        {"parseShowMessageCommandType",                testParseShowMessageCommandType},
         {"companionConfigStoreRoundTrip",             testCompanionConfigStoreRoundTrip},
         {"enrollmentRequestStoreRoundTrip",            testEnrollmentRequestStoreRoundTrip},
         {"captureSchedulerRespectsMinimumsAndMarks",  testCaptureSchedulerRespectsMinimumsAndMarks},
@@ -1174,6 +1460,7 @@ int main() {
         {"parsePolicyResponseAppControlBlockedProcesses", testParsePolicyResponseAppControlBlockedProcesses},
         {"parsePolicyResponseViolationOpenCountZero",  testParsePolicyResponseViolationOpenCountZero},
         {"parsePolicyResponseViolationOpenCountPositive", testParsePolicyResponseViolationOpenCountPositive},
+        {"parsePolicyResponseViolationAppEnforcement", testParsePolicyResponseViolationAppEnforcement},
 
         // New command parser tests (tests 14-18 use command_type values containing "id" as substring — these
         // expose a real bug in jsonIntValue that finds "id" inside "command_type" values. Skipped until
@@ -1195,6 +1482,9 @@ int main() {
         {"versionComparisonPatchOverMinor",            testVersionComparisonPatchOverMinor},
         {"versionComparisonMajorBumpDominates",        testVersionComparisonMajorBumpDominates},
         {"versionComparisonLeadingZeros",               testVersionComparisonLeadingZeros},
+        {"enforcementCoordinatorPassesSnapshotToAdapter", testEnforcementCoordinatorPassesSnapshotToAdapter},
+        {"enforcementCoordinatorShowMessageCommand",   testEnforcementCoordinatorShowMessageCommand},
+        {"enforcementCoordinatorShowMessageCommandRequiresBody", testEnforcementCoordinatorShowMessageCommandRequiresBody},
 
         // New trusted root URL tests
         {"trustedRootInstallerTrailingSlashPreserved", testTrustedRootInstallerTrailingSlashPreserved},
@@ -1221,8 +1511,12 @@ int main() {
         {"pushUpCoordinatorLaunchesSessionWhenClaimed", testPushUpCoordinatorLaunchesSessionWhenClaimed},
         {"pushUpCoordinatorSyncsProgressOnRepIncrement", testPushUpCoordinatorSyncsProgressOnRepIncrement},
         {"pushUpCoordinatorSyncsCompletionOnFinish",   testPushUpCoordinatorSyncsCompletionOnFinish},
+        {"pushUpCoordinatorRetriesCompletionAfterApiFailure", testPushUpCoordinatorRetriesCompletionAfterApiFailure},
         {"pushUpCoordinatorFailsSessionOnDisconnect",   testPushUpCoordinatorFailsSessionOnDisconnect},
+        {"pushUpCoordinatorAbortsHardwareWhenTimingOutSession", testPushUpCoordinatorAbortsHardwareWhenTimingOutSession},
+        {"pushUpCoordinatorClearsStaleSessionWhenHeartbeatStopsReturningIt", testPushUpCoordinatorClearsStaleSessionWhenHeartbeatStopsReturningIt},
         {"pushUpAdapterStateTransitions",              testPushUpAdapterStateTransitions},
+        {"pushUpAdapterRequiresStartAcknowledgement",  testPushUpAdapterRequiresStartAcknowledgement},
         {"pushUpAdapterTestModePumpsFullSequence",     testPushUpAdapterTestModePumpsFullSequence},
         {"pushUpAdapterProtocolLineParsing",           testPushUpAdapterProtocolLineParsing},
     };

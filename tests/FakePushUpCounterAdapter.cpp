@@ -52,8 +52,17 @@ bool FakePushUpCounterAdapter::startSession(
 
     if (m_testMode) {
         enqueueTestResponse(sessionId, totalReps);
+        return true;
+    } else if (m_autoStartAck) {
+        m_state.searchingBack = true;
+        m_state.status = "searching_back";
     }
-    return true;
+
+    return m_state.searchingBack
+        || m_state.working
+        || m_state.currentRep > 0
+        || m_state.completionPending
+        || m_state.status == "complete";
 }
 
 bool FakePushUpCounterAdapter::abortSession(const std::string& /*sessionId*/) {
@@ -61,6 +70,7 @@ bool FakePushUpCounterAdapter::abortSession(const std::string& /*sessionId*/) {
         return false;
     }
 
+    ++m_abortCount;
     m_currentSessionId.clear();
     m_state.currentRep = 0;
     m_state.currentSet = 1;
@@ -70,6 +80,17 @@ bool FakePushUpCounterAdapter::abortSession(const std::string& /*sessionId*/) {
     m_state.status = "idle";
     m_responseQueue = {};
     return true;
+}
+
+void FakePushUpCounterAdapter::hardReset() {
+    ++m_hardResetCount;
+    setConnected(false);
+    m_state.currentRep = 0;
+    m_state.currentSet = 1;
+    m_state.completionPending = false;
+    m_state.searchingBack = false;
+    m_state.working = false;
+    m_state.status = "disconnected";
 }
 
 bool FakePushUpCounterAdapter::consumeCompletion() {
@@ -138,6 +159,13 @@ void FakePushUpCounterAdapter::processLine(const std::string& rawLine) {
         m_state.searchingBack = false;
         m_state.working = false;
         m_state.status = "idle";
+        return;
+    }
+
+    if (line.rfind("STATE ERROR ", 0) == 0) {
+        m_state.searchingBack = false;
+        m_state.working = false;
+        m_state.status = "error";
         return;
     }
 }
@@ -219,6 +247,10 @@ void FakePushUpCounterAdapter::setTestMode(bool testMode) {
     m_testMode = testMode;
 }
 
+void FakePushUpCounterAdapter::setAutoStartAck(bool enabled) {
+    m_autoStartAck = enabled;
+}
+
 void FakePushUpCounterAdapter::setPortName(const std::string& port) {
     m_state.portName = port;
 }
@@ -249,6 +281,18 @@ void FakePushUpCounterAdapter::simulateDisconnection() {
 
 void FakePushUpCounterAdapter::resetAfterInactivity() {
     setConnected(false);
+}
+
+int FakePushUpCounterAdapter::abortCount() const {
+    return m_abortCount;
+}
+
+int FakePushUpCounterAdapter::hardResetCount() const {
+    return m_hardResetCount;
+}
+
+bool FakePushUpCounterAdapter::completionPending() const {
+    return m_state.completionPending;
 }
 
 }  // namespace companion::test

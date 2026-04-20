@@ -26,6 +26,7 @@ public:
     virtual const PushUpCounterState& state() const = 0;
     virtual bool startSession(const std::string& sessionId, int totalReps, int dropThreshold, int upGap, int downTolerance) = 0;
     virtual bool abortSession(const std::string& sessionId) = 0;
+    virtual void hardReset() = 0;
     virtual bool consumeCompletion() = 0;
     virtual void processLine(const std::string& line) = 0;
     virtual void resetAfterInactivity() = 0;

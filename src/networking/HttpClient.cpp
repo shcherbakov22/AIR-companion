@@ -9,11 +9,13 @@
 #pragma comment(lib, "winhttp.lib")
 #endif
 
-#include <optional>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <system_error>
+#include <optional>
 #include <sstream>
+#include <system_error>
+#include <thread>
 
 namespace companion::networking {
 
@@ -31,8 +33,9 @@ std::wstring utf8ToWide(const std::string& value) {
         return {};
     }
 
-    std::wstring result(static_cast<std::size_t>(required - 1), L'\0');
+    std::wstring result(static_cast<std::size_t>(required), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, result.data(), required);
+    result.resize(static_cast<std::size_t>(required - 1));
     return result;
 }
 
@@ -46,8 +49,9 @@ std::string wideToUtf8(const std::wstring& value) {
         return {};
     }
 
-    std::string result(static_cast<std::size_t>(required - 1), '\0');
+    std::string result(static_cast<std::size_t>(required), '\0');
     WideCharToMultiByte(CP_UTF8, 0, value.c_str(), -1, result.data(), required, nullptr, nullptr);
+    result.resize(static_cast<std::size_t>(required - 1));
     return result;
 }
 
@@ -139,6 +143,8 @@ HttpResponse sendRequest(const std::wstring& method,
         return response;
     }
 
+    WinHttpSetTimeouts(request, 10000, 10000, 30000, 30000);
+
     const auto headerBlock = buildHeaderBlock(headers);
     LPVOID bodyData = body.empty() ? WINHTTP_NO_REQUEST_DATA : reinterpret_cast<LPVOID>(body.empty() ? nullptr : const_cast<char*>(body.data()));
     const auto bodySize = static_cast<DWORD>(body.size());
@@ -196,6 +202,146 @@ HttpResponse sendRequest(const std::wstring& method,
     WinHttpCloseHandle(connect);
     WinHttpCloseHandle(session);
     return response;
+}
+
+bool streamDownloadToFile(const std::string& url,
+                          const std::map<std::string, std::string>& headers,
+                          const std::string& filePath,
+                          const HttpRequestOptions& options) {
+    const auto parsed = parseUrl(url);
+    if (!parsed.has_value()) {
+        return false;
+    }
+
+    std::error_code errorCode;
+    const auto outputPath = std::filesystem::path(filePath);
+    std::filesystem::create_directories(outputPath.parent_path(), errorCode);
+    if (errorCode) {
+        return false;
+    }
+
+    const auto partialPath = outputPath.string() + ".download";
+    std::filesystem::remove(partialPath, errorCode);
+
+    const auto session = WinHttpOpen(L"AIRCompanion/0.1",
+                                     WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                                     WINHTTP_NO_PROXY_NAME,
+                                     WINHTTP_NO_PROXY_BYPASS,
+                                     0);
+    if (!session) {
+        return false;
+    }
+
+    const auto connect = WinHttpConnect(session, parsed->host.c_str(), parsed->port, 0);
+    if (!connect) {
+        WinHttpCloseHandle(session);
+        return false;
+    }
+
+    const DWORD requestFlags = parsed->secure ? WINHTTP_FLAG_SECURE : 0;
+    const auto request = WinHttpOpenRequest(connect,
+                                            L"GET",
+                                            parsed->path.c_str(),
+                                            nullptr,
+                                            WINHTTP_NO_REFERER,
+                                            WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                            requestFlags);
+    if (!request) {
+        WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        return false;
+    }
+
+    WinHttpSetTimeouts(request, 10000, 10000, 30000, 30000);
+
+    if (parsed->secure && options.allowInvalidCertificate) {
+        DWORD securityFlags =
+            SECURITY_FLAG_IGNORE_UNKNOWN_CA |
+            SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+        WinHttpSetOption(request, WINHTTP_OPTION_SECURITY_FLAGS, &securityFlags, sizeof(securityFlags));
+    }
+
+    const auto headerBlock = buildHeaderBlock(headers);
+    bool success = false;
+    const bool sent = WinHttpSendRequest(
+        request,
+        headerBlock.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headerBlock.c_str(),
+        static_cast<DWORD>(headerBlock.size()),
+        WINHTTP_NO_REQUEST_DATA,
+        0,
+        0,
+        0
+    );
+
+    if (sent && WinHttpReceiveResponse(request, nullptr)) {
+        DWORD statusCode = 0;
+        DWORD statusCodeSize = sizeof(statusCode);
+        WinHttpQueryHeaders(request,
+                            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                            WINHTTP_HEADER_NAME_BY_INDEX,
+                            &statusCode,
+                            &statusCodeSize,
+                            WINHTTP_NO_HEADER_INDEX);
+
+        if (statusCode >= 200 && statusCode < 300) {
+            std::ofstream output(partialPath, std::ios::binary | std::ios::trunc);
+            if (output.is_open()) {
+                success = true;
+                while (true) {
+                    DWORD available = 0;
+                    if (!WinHttpQueryDataAvailable(request, &available)) {
+                        success = false;
+                        break;
+                    }
+                    if (available == 0) {
+                        break;
+                    }
+
+                    std::string chunk(static_cast<std::size_t>(available), '\0');
+                    DWORD downloaded = 0;
+                    if (!WinHttpReadData(request, chunk.data(), available, &downloaded)) {
+                        success = false;
+                        break;
+                    }
+                    if (downloaded == 0) {
+                        success = false;
+                        break;
+                    }
+
+                    output.write(chunk.data(), static_cast<std::streamsize>(downloaded));
+                    if (!output.good()) {
+                        success = false;
+                        break;
+                    }
+                }
+                output.close();
+                success = success && output.good();
+            }
+        }
+    }
+
+    WinHttpCloseHandle(request);
+    WinHttpCloseHandle(connect);
+    WinHttpCloseHandle(session);
+
+    if (!success) {
+        std::filesystem::remove(partialPath, errorCode);
+        return false;
+    }
+
+    std::filesystem::rename(partialPath, outputPath, errorCode);
+    if (errorCode) {
+        std::filesystem::remove(outputPath, errorCode);
+        errorCode.clear();
+        std::filesystem::rename(partialPath, outputPath, errorCode);
+    }
+
+    if (errorCode) {
+        std::filesystem::remove(partialPath, errorCode);
+        return false;
+    }
+
+    return true;
 }
 
 std::string readFileBytes(const std::string& path) {
@@ -286,6 +432,17 @@ bool HttpClient::downloadToFile(const std::string& url,
                                 const std::map<std::string, std::string>& headers,
                                 const std::string& filePath,
                                 const HttpRequestOptions& options) const {
+#ifdef _WIN32
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        if (streamDownloadToFile(url, headers, filePath, options)) {
+            return true;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(500 * (attempt + 1)));
+    }
+
+    return false;
+#else
     const auto response = get(url, headers, options);
     if (response.statusCode < 200 || response.statusCode >= 300) {
         return false;
@@ -304,6 +461,7 @@ bool HttpClient::downloadToFile(const std::string& url,
 
     output.write(response.body.data(), static_cast<std::streamsize>(response.body.size()));
     return output.good();
+#endif
 }
 
 }  // namespace companion::networking

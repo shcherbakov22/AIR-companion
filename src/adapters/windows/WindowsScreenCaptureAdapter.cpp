@@ -14,9 +14,11 @@
 #endif
 
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <thread>
 #include <vector>
 
@@ -24,8 +26,8 @@ namespace companion::adapters::windows {
 
 #ifdef _WIN32
 namespace {
-constexpr int kOutputWidth = 1920;
-constexpr int kOutputHeight = 1080;
+constexpr int kOutputWidth = 1493;
+constexpr int kOutputHeight = 840;
 constexpr ULONG kJpegQuality = 88;
 
 void appendDebugLog(const std::string& line) {
@@ -77,8 +79,9 @@ std::wstring utf8ToWide(const std::string& value) {
         return {};
     }
 
-    std::wstring result(static_cast<std::size_t>(required - 1), L'\0');
+    std::wstring result(static_cast<std::size_t>(required), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, result.data(), required);
+    result.resize(static_cast<std::size_t>(required - 1));
     return result;
 }
 
@@ -92,9 +95,203 @@ std::string wideToUtf8(const std::wstring& value) {
         return {};
     }
 
-    std::string result(static_cast<std::size_t>(required - 1), '\0');
+    std::string result(static_cast<std::size_t>(required), '\0');
     WideCharToMultiByte(CP_UTF8, 0, value.c_str(), -1, result.data(), required, nullptr, nullptr);
+    result.resize(static_cast<std::size_t>(required - 1));
     return result;
+}
+
+std::wstring powerShellSingleQuoted(const std::wstring& value) {
+    std::wstring escaped;
+    escaped.reserve(value.size() + 8);
+    for (const wchar_t character : value) {
+        escaped.push_back(character);
+        if (character == L'\'') {
+            escaped.push_back(L'\'');
+        }
+    }
+    return escaped;
+}
+
+std::wstring powerShellCaptureScript() {
+    std::wstringstream script;
+    script
+        << L"param([string]$OutputPath);"
+        << L"$ErrorActionPreference='Stop';"
+        << L"Add-Type -AssemblyName System.Windows.Forms;"
+        << L"Add-Type -AssemblyName System.Drawing;"
+        << L"$bounds=[System.Windows.Forms.SystemInformation]::VirtualScreen;"
+        << L"if($bounds.Width -le 0 -or $bounds.Height -le 0){throw 'invalid virtual screen bounds'};"
+        << L"$capture=[System.Drawing.Bitmap]::new($bounds.Width,$bounds.Height);"
+        << L"$graphics=[System.Drawing.Graphics]::FromImage($capture);"
+        << L"$graphics.CopyFromScreen($bounds.Left,$bounds.Top,0,0,$capture.Size);"
+        << L"$output=[System.Drawing.Bitmap]::new(1493,840);"
+        << L"$outputGraphics=[System.Drawing.Graphics]::FromImage($output);"
+        << L"$outputGraphics.Clear([System.Drawing.Color]::Black);"
+        << L"$scale=[Math]::Min(1493.0 / $bounds.Width, 840.0 / $bounds.Height);"
+        << L"$drawWidth=[int]($bounds.Width * $scale);"
+        << L"$drawHeight=[int]($bounds.Height * $scale);"
+        << L"$offsetX=[int]((1493 - $drawWidth) / 2);"
+        << L"$offsetY=[int]((840 - $drawHeight) / 2);"
+        << L"$dest=[System.Drawing.Rectangle]::new($offsetX,$offsetY,$drawWidth,$drawHeight);"
+        << L"$outputGraphics.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic;"
+        << L"$outputGraphics.PixelOffsetMode=[System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality;"
+        << L"$outputGraphics.SmoothingMode=[System.Drawing.Drawing2D.SmoothingMode]::HighQuality;"
+        << L"$outputGraphics.DrawImage($capture,$dest);"
+        << L"$directory=[System.IO.Path]::GetDirectoryName($OutputPath);"
+        << L"if(-not [string]::IsNullOrWhiteSpace($directory)){[System.IO.Directory]::CreateDirectory($directory) | Out-Null;}"
+        << L"$output.Save($OutputPath,[System.Drawing.Imaging.ImageFormat]::Jpeg);"
+        << L"$outputGraphics.Dispose();"
+        << L"$graphics.Dispose();"
+        << L"$output.Dispose();"
+        << L"$capture.Dispose();";
+    return script.str();
+}
+
+std::optional<std::string> runPowerShellScreenCapture(const std::string& outputPath) {
+    const auto wideOutputPath = utf8ToWide(outputPath);
+    if (wideOutputPath.empty()) {
+        appendDebugLog("screen capture powershell invalid output path");
+        return std::nullopt;
+    }
+
+    const std::wstring commandLine =
+        L"powershell.exe -Sta -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"" + powerShellCaptureScript() + L"\" -OutputPath '" + powerShellSingleQuoted(wideOutputPath) + L"'";
+
+    STARTUPINFOW startupInfo{};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInformation{};
+
+    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back(L'\0');
+
+    const BOOL created = CreateProcessW(
+        nullptr,
+        mutableCommandLine.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &startupInfo,
+        &processInformation
+    );
+
+    if (!created) {
+        appendDebugLog("screen capture powershell CreateProcessW failed error=" + std::to_string(GetLastError()));
+        return std::nullopt;
+    }
+
+    const DWORD waitResult = WaitForSingleObject(processInformation.hProcess, 30000);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(processInformation.hProcess, &exitCode);
+    CloseHandle(processInformation.hThread);
+    CloseHandle(processInformation.hProcess);
+
+    if (waitResult == WAIT_FAILED) {
+        appendDebugLog("screen capture powershell wait failed error=" + std::to_string(GetLastError()));
+        return std::nullopt;
+    }
+
+    if (waitResult == WAIT_TIMEOUT) {
+        appendDebugLog("screen capture powershell timed out");
+        return std::nullopt;
+    }
+
+    if (exitCode != 0) {
+        appendDebugLog("screen capture powershell exitCode=" + std::to_string(exitCode));
+        return std::nullopt;
+    }
+
+    if (!std::filesystem::exists(outputPath)) {
+        appendDebugLog("screen capture powershell missing output path=" + outputPath);
+        return std::nullopt;
+    }
+
+    return outputPath;
+}
+
+std::optional<std::string> runPowerShellScreenCaptureAsUser(
+    HANDLE primaryToken,
+    const std::filesystem::path& scriptPath,
+    const std::filesystem::path& outputPath
+) {
+    const auto wideScriptPath = scriptPath.wstring();
+    const auto wideOutputPath = outputPath.wstring();
+    if (wideScriptPath.empty() || wideOutputPath.empty()) {
+        appendDebugLog("screen capture helper invalid powershell script or output path");
+        return std::nullopt;
+    }
+
+    std::wstring commandLine =
+        L"powershell.exe -Sta -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File \"";
+    commandLine += wideScriptPath;
+    commandLine += L"\" -OutputPath \"";
+    commandLine += wideOutputPath;
+    commandLine += L"\"";
+
+    STARTUPINFOW startupInfo{};
+    startupInfo.cb = sizeof(startupInfo);
+    startupInfo.lpDesktop = const_cast<LPWSTR>(L"winsta0\\default");
+    PROCESS_INFORMATION processInformation{};
+
+    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back(L'\0');
+
+    void* environment = nullptr;
+    CreateEnvironmentBlock(&environment, primaryToken, FALSE);
+
+    const BOOL created = CreateProcessAsUserW(
+        primaryToken,
+        nullptr,
+        mutableCommandLine.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+        environment,
+        nullptr,
+        &startupInfo,
+        &processInformation
+    );
+
+    if (environment != nullptr) {
+        DestroyEnvironmentBlock(environment);
+    }
+
+    if (!created) {
+        appendDebugLog("screen capture powershell CreateProcessAsUserW failed error=" + std::to_string(GetLastError()));
+        return std::nullopt;
+    }
+
+    const DWORD waitResult = WaitForSingleObject(processInformation.hProcess, 30000);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(processInformation.hProcess, &exitCode);
+    CloseHandle(processInformation.hThread);
+    CloseHandle(processInformation.hProcess);
+
+    if (waitResult == WAIT_FAILED) {
+        appendDebugLog("screen capture powershell wait failed error=" + std::to_string(GetLastError()));
+        return std::nullopt;
+    }
+
+    if (waitResult == WAIT_TIMEOUT) {
+        appendDebugLog("screen capture powershell timed out");
+        return std::nullopt;
+    }
+
+    if (exitCode != 0) {
+        appendDebugLog("screen capture powershell exitCode=" + std::to_string(exitCode));
+        return std::nullopt;
+    }
+
+    if (!std::filesystem::exists(outputPath)) {
+        appendDebugLog("screen capture powershell missing output path=" + wideToUtf8(outputPath.wstring()));
+        return std::nullopt;
+    }
+
+    return wideToUtf8(outputPath.wstring());
 }
 
 bool encoderClsid(const wchar_t* mimeType, CLSID& clsid) {
@@ -182,7 +379,7 @@ std::wstring currentExecutablePath() {
     return path;
 }
 
-std::wstring trayBinaryPath() {
+std::wstring helperBinaryPath() {
     auto path = currentExecutablePath();
     if (path.empty()) {
         return {};
@@ -191,17 +388,17 @@ std::wstring trayBinaryPath() {
     const std::wstring needle = L"air_companion_service.exe";
     const auto position = path.rfind(needle);
     if (position != std::wstring::npos) {
-        path.replace(position, needle.size(), L"air_companion_tray.exe");
+        path.replace(position, needle.size(), L"air_companion_helper.exe");
     }
     return path;
 }
 
 std::filesystem::path sharedInteractiveCaptureDirectory() {
-    if (const auto* publicRoot = std::getenv("PUBLIC"); publicRoot != nullptr && *publicRoot != '\0') {
-        return std::filesystem::path(publicRoot) / "AIRCompanion" / "InteractiveCapture";
+    if (const auto* programData = std::getenv("PROGRAMDATA"); programData != nullptr && *programData != '\0') {
+        return std::filesystem::path(programData) / "AIRCompanion" / "Internal";
     }
 
-    return std::filesystem::path("C:\\Users\\Public\\AIRCompanion\\InteractiveCapture");
+    return std::filesystem::path("C:\\ProgramData\\AIRCompanion\\Internal");
 }
 
 bool sameSessionAsActiveConsole() {
@@ -236,58 +433,12 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureInteractive(const
     std::filesystem::create_directories(outputDirectory);
 
 #ifdef _WIN32
-    GdiPlusSession gdiPlusSession;
-
-    const int screenX = 0;
-    const int screenY = 0;
-    const int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-    const int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-
-    if (screenWidth <= 0 || screenHeight <= 0) {
-        appendDebugLog("screen capture interactive invalid primary screen metrics");
-        return std::nullopt;
-    }
-
     const auto path = outputDirectory + "/screen-capture.jpg";
-
-    HDC screenDc = GetDC(nullptr);
-    if (!screenDc) {
-        appendDebugLog("screen capture interactive GetDC failed");
-        return std::nullopt;
+    appendDebugLog("screen capture interactive using powershell path=" + path);
+    const auto result = runPowerShellScreenCapture(path);
+    if (result.has_value()) {
+        appendDebugLog("screen capture interactive saved path=" + path);
     }
-
-    HDC memoryDc = CreateCompatibleDC(screenDc);
-    if (!memoryDc) {
-        appendDebugLog("screen capture interactive CreateCompatibleDC failed");
-        ReleaseDC(nullptr, screenDc);
-        return std::nullopt;
-    }
-
-    HBITMAP bitmap = CreateCompatibleBitmap(screenDc, screenWidth, screenHeight);
-    if (!bitmap) {
-        appendDebugLog("screen capture interactive CreateCompatibleBitmap failed");
-        DeleteDC(memoryDc);
-        ReleaseDC(nullptr, screenDc);
-        return std::nullopt;
-    }
-
-    HGDIOBJ previousObject = SelectObject(memoryDc, bitmap);
-    const bool copied = BitBlt(memoryDc, 0, 0, screenWidth, screenHeight, screenDc, screenX, screenY, SRCCOPY | CAPTUREBLT) != 0;
-    SelectObject(memoryDc, previousObject);
-
-    std::optional<std::string> result;
-    if (copied) {
-        result = saveBitmapAsJpeg(bitmap, screenWidth, screenHeight, path);
-        if (result.has_value()) {
-            appendDebugLog("screen capture interactive saved path=" + path);
-        }
-    } else {
-        appendDebugLog("screen capture interactive BitBlt failed");
-    }
-
-    DeleteObject(bitmap);
-    DeleteDC(memoryDc);
-    ReleaseDC(nullptr, screenDc);
     return result;
 #else
     (void) outputDirectory;
@@ -297,19 +448,26 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureInteractive(const
 
 std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionHelper(const std::string& outputDirectory) const {
 #ifdef _WIN32
-    (void) outputDirectory;
     const auto stagingDirectory = sharedInteractiveCaptureDirectory();
     std::filesystem::create_directories(stagingDirectory);
     const auto stagingPath = stagingDirectory / "screen-capture.jpg";
+    const auto scriptPath = stagingDirectory / "screen-capture.ps1";
+    const auto finalOutputPath = std::filesystem::path(outputDirectory) / "screen-capture.jpg";
     std::error_code errorCode;
     std::filesystem::remove(stagingPath, errorCode);
+    std::filesystem::create_directories(finalOutputPath.parent_path(), errorCode);
+    std::filesystem::remove(finalOutputPath, errorCode);
     appendDebugLog("screen capture helper staging=" + wideToUtf8(stagingPath.wstring()));
 
-    const auto helperPath = trayBinaryPath();
-    if (helperPath.empty() || !std::filesystem::exists(helperPath)) {
-        appendDebugLog("screen capture helper binary missing");
+    std::ofstream scriptOutput(scriptPath, std::ios::trunc);
+    if (!scriptOutput.is_open()) {
+        appendDebugLog("screen capture helper unable to write powershell script");
         return std::nullopt;
     }
+    const auto scriptBody = powerShellCaptureScript();
+    const auto scriptText = wideToUtf8(scriptBody);
+    scriptOutput << scriptText;
+    scriptOutput.close();
 
     const auto activeSessionId = WTSGetActiveConsoleSessionId();
     if (activeSessionId == 0xFFFFFFFF) {
@@ -331,61 +489,24 @@ std::optional<std::string> WindowsScreenCaptureAdapter::captureViaActiveSessionH
         return std::nullopt;
     }
 
-    void* environment = nullptr;
-    CreateEnvironmentBlock(&environment, primaryToken, FALSE);
-
-    STARTUPINFOW startupInfo{};
-    startupInfo.cb = sizeof(startupInfo);
-    startupInfo.lpDesktop = const_cast<LPWSTR>(L"winsta0\\default");
-    PROCESS_INFORMATION processInformation{};
-
-    std::wstring commandLine = L"\"";
-    commandLine += helperPath;
-    commandLine += L"\" --capture-screen-once \"";
-    commandLine += stagingDirectory.wstring();
-    commandLine += L"\"";
-
-    const auto created = CreateProcessAsUserW(
-        primaryToken,
-        nullptr,
-        commandLine.data(),
-        nullptr,
-        nullptr,
-        FALSE,
-        CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
-        environment,
-        nullptr,
-        &startupInfo,
-        &processInformation
-    );
-
-    if (environment != nullptr) {
-        DestroyEnvironmentBlock(environment);
-    }
+    appendDebugLog("screen capture helper launching powershell directly");
+    const auto captureResult = runPowerShellScreenCaptureAsUser(primaryToken, scriptPath, stagingPath);
     CloseHandle(primaryToken);
     CloseHandle(userToken);
-
-    if (!created) {
-        appendDebugLog("screen capture helper CreateProcessAsUserW failed error=" + std::to_string(GetLastError()));
-        return std::nullopt;
-    }
-    appendDebugLog("screen capture helper created process");
-
-    WaitForSingleObject(processInformation.hProcess, 15000);
-    DWORD exitCode = 1;
-    GetExitCodeProcess(processInformation.hProcess, &exitCode);
-    appendDebugLog("screen capture helper exitCode=" + std::to_string(exitCode));
-    CloseHandle(processInformation.hThread);
-    CloseHandle(processInformation.hProcess);
-
-    if (exitCode != 0) {
+    if (!captureResult.has_value()) {
         return std::nullopt;
     }
 
-    for (int attempt = 0; attempt < 30; ++attempt) {
+    for (int attempt = 0; attempt < 120; ++attempt) {
         if (std::filesystem::exists(stagingPath)) {
-            appendDebugLog("screen capture helper staged file ready");
-            return wideToUtf8(stagingPath.wstring());
+            std::filesystem::copy_file(stagingPath, finalOutputPath, std::filesystem::copy_options::overwrite_existing, errorCode);
+            if (errorCode) {
+                appendDebugLog("screen capture helper copy failed error=" + errorCode.message());
+                return wideToUtf8(stagingPath.wstring());
+            }
+
+            appendDebugLog("screen capture helper staged file ready final=" + finalOutputPath.string());
+            return finalOutputPath.string();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }

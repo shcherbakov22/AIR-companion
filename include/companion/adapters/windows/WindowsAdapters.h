@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "companion/adapters/IBrowserDomainAdapter.h"
@@ -21,9 +23,9 @@ namespace companion::adapters::windows {
 class WindowsScreenCaptureAdapter final : public IScreenCaptureAdapter {
 public:
     std::optional<std::string> captureToFile(const std::string& outputDirectory) override;
+    std::optional<std::string> captureInteractive(const std::string& outputDirectory) const;
 
 private:
-    std::optional<std::string> captureInteractive(const std::string& outputDirectory) const;
     std::optional<std::string> captureViaActiveSessionHelper(const std::string& outputDirectory) const;
 };
 
@@ -50,12 +52,17 @@ public:
 
 class WindowsEnforcementAdapter final : public IEnforcementAdapter {
 public:
-    void applyPolicy(const models::DevicePolicy& policy) override;
+    void applyPolicy(const models::DevicePolicy& policy, const models::ActivitySnapshot& snapshot) override;
     void terminateBlockedApps(const std::vector<std::string>& blockedApps) override;
+    bool showMessage(const std::string& title, const std::string& body, int displaySeconds, std::string& error) override;
     std::string describeState() const override;
 
 private:
+    std::unordered_set<std::string> violationKillTargets(const models::DevicePolicy& policy, const models::ActivitySnapshot& snapshot);
+
     std::string m_lastState{"idle"};
+    std::unordered_set<std::string> m_lastObservedOpenApps;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_browserGraceUntil;
 };
 
 class WindowsServiceLifecycleAdapter final : public IServiceLifecycleAdapter {
@@ -115,6 +122,7 @@ public:
     const PushUpCounterState& state() const override;
     bool startSession(const std::string& sessionId, int totalReps, int dropThreshold, int upGap, int downTolerance) override;
     bool abortSession(const std::string& sessionId) override;
+    void hardReset() override;
     bool consumeCompletion() override;
     void processLine(const std::string& line) override;
     void resetAfterInactivity() override;
@@ -127,6 +135,7 @@ private:
     void parseLine(const std::string& line);
     bool sendLine(const std::string& line);
     void checkInactivityReset();
+    void hardResetArduino();
 
     static constexpr auto kInactivityTimeout = std::chrono::seconds(60);
 

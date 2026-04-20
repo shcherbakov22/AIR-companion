@@ -32,8 +32,9 @@ std::wstring utf8ToWide(const std::string& value) {
         return {};
     }
 
-    std::wstring converted(static_cast<std::size_t>(required - 1), L'\0');
+    std::wstring converted(static_cast<std::size_t>(required), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, converted.data(), required);
+    converted.resize(static_cast<std::size_t>(required - 1));
     return converted;
 }
 
@@ -164,9 +165,9 @@ bool WindowsRemoteAccessAdapter::verifyReadiness() {
 
     const bool active = helperIsListening();
     m_state.active = active;
-    m_state.ready = true;
+    m_state.ready = active;
     if (!active) {
-        m_state.failureReason.clear();
+        m_state.failureReason = "remote control helper is not listening on a reachable interface";
     } else {
         m_state.failureReason.clear();
     }
@@ -378,8 +379,9 @@ bool WindowsRemoteAccessAdapter::isTcpPortListening(unsigned short port) const {
 #ifdef _WIN32
     return runCommand(
         "powershell -NoProfile -NonInteractive -Command \""
-        "$listener = Get-NetTCPConnection -State Listen -LocalPort " + std::to_string(port) + " -ErrorAction SilentlyContinue; "
-        "if ($listener) { exit 0 } else { exit 1 }"
+        "$listeners = Get-NetTCPConnection -State Listen -LocalPort " + std::to_string(port) + " -ErrorAction SilentlyContinue; "
+        "$reachable = $listeners | Where-Object { $_.LocalAddress -notin @('127.0.0.1', '::1') }; "
+        "if ($reachable) { exit 0 } else { exit 1 }"
         "\""
     );
 #else

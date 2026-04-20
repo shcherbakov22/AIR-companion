@@ -1,6 +1,9 @@
 #include "companion/service/ServiceHost.h"
 
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 
 #ifdef _WIN32
@@ -17,6 +20,24 @@ namespace {
 #ifdef _WIN32
 constexpr wchar_t kServiceName[] = L"AIRCompanion";
 #endif
+
+void appendServiceLog(const std::string& line) {
+    const char* programData = std::getenv("PROGRAMDATA");
+    if (programData == nullptr || *programData == '\0') {
+        return;
+    }
+
+    const auto logDirectory = std::filesystem::path(programData) / "AIRCompanion" / "Logs";
+    std::error_code errorCode;
+    std::filesystem::create_directories(logDirectory, errorCode);
+
+    std::ofstream output(logDirectory / "service-host.log", std::ios::app);
+    if (!output.is_open()) {
+        return;
+    }
+
+    output << line << '\n';
+}
 
 }  // namespace
 
@@ -157,7 +178,26 @@ unsigned long ServiceHost::controlHandler(unsigned long control, unsigned long e
 }
 
 void ServiceHost::workerLoop() {
-    m_worker(*this);
+    while (!m_stopRequested) {
+        try {
+            appendServiceLog("worker loop starting");
+            m_worker(*this);
+            appendServiceLog("worker loop returned");
+        } catch (const std::exception& exception) {
+            m_lastStatus = std::string("service host exception: ") + exception.what();
+            appendServiceLog(m_lastStatus);
+        } catch (...) {
+            m_lastStatus = "service host exception: unknown";
+            appendServiceLog(m_lastStatus);
+        }
+
+        if (m_stopRequested) {
+            break;
+        }
+
+        appendServiceLog("worker loop restarting after unexpected return");
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
 
 #ifdef _WIN32
     if (m_stopEvent != nullptr) {

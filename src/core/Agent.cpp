@@ -125,7 +125,7 @@ void Agent::tick() {
     auto policy = m_policySync.refresh();
     if (policy.has_value()) {
         m_captureScheduler.updatePolicy(*policy);
-        m_enforcementCoordinator.applyPolicy(*policy);
+        m_enforcementCoordinator.applyPolicy(*policy, snapshot);
         m_lastPolicy = *policy;
         m_status = "policy synced: " + policy->policyHash;
     }
@@ -184,10 +184,13 @@ void Agent::tick() {
                 output = success ? "remote control stopped" : m_remoteAccessAdapter.currentState().failureReason;
                 break;
             }
-            default:
-                m_enforcementCoordinator.applyCommand(command);
+            default: {
+                const auto result = m_enforcementCoordinator.applyCommand(command);
+                success = result.success;
+                output = result.output;
                 appendDebugLog("agent non-capture command processed");
                 break;
+            }
         }
 
         m_commandPoller.submitResult(command.id, success, output);

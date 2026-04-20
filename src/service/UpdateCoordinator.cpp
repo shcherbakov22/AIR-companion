@@ -24,6 +24,7 @@ namespace companion::service {
 namespace {
 
 constexpr auto kUpdateCheckInterval = std::chrono::minutes(15);
+constexpr auto kUpdateFailureRetryInterval = std::chrono::minutes(1);
 constexpr auto kUpdateLaunchGracePeriod = std::chrono::minutes(2);
 
 void appendDebugLog(const std::string& line) {
@@ -87,7 +88,18 @@ std::vector<int> parseVersion(const std::string& value) {
             continue;
         }
 
-        parts.push_back(std::stoi(token));
+        int parsed = 0;
+        bool sawDigit = false;
+        for (const auto ch : token) {
+            if (!std::isdigit(static_cast<unsigned char>(ch))) {
+                break;
+            }
+
+            sawDigit = true;
+            parsed = (parsed * 10) + (ch - '0');
+        }
+
+        parts.push_back(sawDigit ? parsed : 0);
     }
 
     return parts;
@@ -136,6 +148,7 @@ void UpdateCoordinator::tick() {
     if (!manifest.has_value() || !manifest->available) {
         m_status = "updates unavailable";
         appendDebugLog("update: manifest unavailable");
+        scheduleFailureRetry();
         return;
     }
 
@@ -150,18 +163,34 @@ void UpdateCoordinator::tick() {
     if (!m_apiClient.downloadFile(manifest->downloadUrl, packagePath)) {
         m_status = "update download failed";
         appendDebugLog("update: download failed version=" + manifest->version);
+        scheduleFailureRetry();
+        return;
+    }
+
+    std::error_code fileSizeError;
+    const auto downloadedSize = std::filesystem::file_size(packagePath, fileSizeError);
+    if (fileSizeError || (manifest->sizeBytes > 0 && downloadedSize != manifest->sizeBytes)) {
+        m_status = "update download size mismatch";
+        appendDebugLog("update: size mismatch path=" + packagePath + " expected=" + std::to_string(manifest->sizeBytes) + " actual=" + std::to_string(fileSizeError ? 0 : downloadedSize));
+        std::error_code errorCode;
+        std::filesystem::remove(packagePath, errorCode);
+        scheduleFailureRetry();
         return;
     }
 
     if (!verifyChecksum(packagePath, manifest->sha256)) {
         m_status = "update checksum failed";
         appendDebugLog("update: checksum failed path=" + packagePath);
+        std::error_code errorCode;
+        std::filesystem::remove(packagePath, errorCode);
+        scheduleFailureRetry();
         return;
     }
 
     if (!launchUpdater(packagePath)) {
         m_status = "update launch failed";
         appendDebugLog("update: launch failed package=" + packagePath);
+        scheduleFailureRetry();
         return;
     }
 
@@ -196,6 +225,11 @@ bool UpdateCoordinator::isNewerVersion(const std::string& candidate, const std::
 bool UpdateCoordinator::shouldCheckNow() const {
     return m_lastCheck.time_since_epoch().count() == 0
         || (std::chrono::steady_clock::now() - m_lastCheck) >= kUpdateCheckInterval;
+}
+
+void UpdateCoordinator::scheduleFailureRetry() {
+    const auto now = std::chrono::steady_clock::now();
+    m_lastCheck = now - (kUpdateCheckInterval - kUpdateFailureRetryInterval);
 }
 
 bool UpdateCoordinator::verifyChecksum(const std::string& filePath, const std::string& expectedSha256) const {
@@ -341,8 +375,9 @@ std::string UpdateCoordinator::currentExecutablePath() const {
         return {};
     }
 
-    std::string converted(static_cast<std::size_t>(required - 1), '\0');
+    std::string converted(static_cast<std::size_t>(required), '\0');
     WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, converted.data(), required, nullptr, nullptr);
+    converted.resize(static_cast<std::size_t>(required - 1));
     return converted;
 #else
     return {};

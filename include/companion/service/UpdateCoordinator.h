@@ -19,6 +19,7 @@ public:
 
 private:
     bool shouldCheckNow() const;
+    void scheduleFailureRetry();
     bool verifyChecksum(const std::string& filePath, const std::string& expectedSha256) const;
     bool launchUpdater(const std::string& packagePath) const;
     std::string currentExecutablePath() const;

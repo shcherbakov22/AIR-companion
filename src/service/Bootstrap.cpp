@@ -42,20 +42,40 @@ void launchBrowserLoginUrl(const std::string& browserLoginUrl) {
 #endif
 }
 
+bool rewriteExternalPlatformUrl(StoredCompanionConfig& config) {
+    constexpr const char* kLocalBaseUrl = "https://192.168.11.228";
+
+    if (config.baseUrl == "https://karatunov.net"
+        || config.baseUrl == "http://karatunov.net"
+        || config.baseUrl == "https://karatunov.net/"
+        || config.baseUrl == "http://karatunov.net/") {
+        config.baseUrl = kLocalBaseUrl;
+        config.rootCaUrl.clear();
+        return true;
+    }
+
+    return false;
+}
+
 }  // namespace
 
 Bootstrap::Bootstrap(CompanionConfigStore configStore) : m_configStore(std::move(configStore)) {}
 
 std::optional<BootstrapResult> Bootstrap::initialize() const {
     if (const auto stored = m_configStore.load(); stored.has_value()) {
-        if (!ensureTrustedRoot(stored->baseUrl, stored->rootCaUrl, false)) {
+        auto config = *stored;
+        if (rewriteExternalPlatformUrl(config)) {
+            (void) m_configStore.save(config);
+        }
+
+        if (!ensureTrustedRoot(config.baseUrl, config.rootCaUrl, false)) {
             return std::nullopt;
         }
 
-        networking::CompanionApiClient apiClient(stored->baseUrl);
-        const auto renewResult = apiClient.renewToken(stored->deviceToken);
+        networking::CompanionApiClient apiClient(config.baseUrl);
+        const auto renewResult = apiClient.renewToken(config.deviceToken);
         if (renewResult.token.has_value()) {
-            auto refreshed = *stored;
+            auto refreshed = config;
             refreshed.deviceToken = *renewResult.token;
             (void)m_configStore.save(refreshed);
             return BootstrapResult{
@@ -70,7 +90,7 @@ std::optional<BootstrapResult> Bootstrap::initialize() const {
         } else {
             return BootstrapResult{
                 std::move(apiClient),
-                std::move(*stored),
+                std::move(config),
                 "loaded saved enrollment without token refresh",
             };
         }

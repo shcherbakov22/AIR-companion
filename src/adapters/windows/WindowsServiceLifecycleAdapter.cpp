@@ -87,8 +87,9 @@ bool WindowsServiceLifecycleAdapter::install() {
                 return std::string{};
             }
 
-            std::string converted(static_cast<std::size_t>(required - 1), '\0');
+            std::string converted(static_cast<std::size_t>(required), '\0');
             WideCharToMultiByte(CP_UTF8, 0, binaryPath.c_str(), -1, converted.data(), required, nullptr, nullptr);
+            converted.resize(static_cast<std::size_t>(required - 1));
             return converted;
         }()
     );
@@ -101,8 +102,9 @@ bool WindowsServiceLifecycleAdapter::install() {
             return std::wstring{};
         }
 
-        std::wstring converted(static_cast<std::size_t>(required - 1), L'\0');
+        std::wstring converted(static_cast<std::size_t>(required), L'\0');
         MultiByteToWideChar(CP_UTF8, 0, serviceBinaryPath.c_str(), -1, converted.data(), required);
+        converted.resize(static_cast<std::size_t>(required - 1));
         return converted;
     }();
     if (serviceBinaryWide.empty()) {

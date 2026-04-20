@@ -12,6 +12,11 @@ enum class InternetAccessMode {
 };
 
 struct DevicePolicy {
+    struct ViolationAppEnforcement {
+        bool killGuiApps{false};
+        int browserReopenGraceSeconds{60};
+    };
+
     std::string policyHash;
     std::string studentDisplayName;
     std::string activeScheduleName;
@@ -27,6 +32,7 @@ struct DevicePolicy {
     InternetAccessMode internetAccessMode{InternetAccessMode::BlockAll};
     std::vector<std::string> allowedDomains;
     std::vector<std::string> blockedApps;
+    ViolationAppEnforcement violationAppEnforcement{};
 };
 
 }  // namespace companion::models

@@ -70,8 +70,9 @@ std::wstring utf8ToWide(const std::string& value) {
         return {};
     }
 
-    std::wstring result(static_cast<std::size_t>(required - 1), L'\0');
+    std::wstring result(static_cast<std::size_t>(required), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, result.data(), required);
+    result.resize(static_cast<std::size_t>(required - 1));
     return result;
 }
 
@@ -189,7 +190,7 @@ std::wstring currentExecutablePath() {
     return path;
 }
 
-std::wstring trayBinaryPath() {
+std::wstring helperBinaryPath() {
     auto path = currentExecutablePath();
     if (path.empty()) {
         return {};
@@ -198,7 +199,7 @@ std::wstring trayBinaryPath() {
     const std::wstring needle = L"air_companion_service.exe";
     const auto position = path.rfind(needle);
     if (position != std::wstring::npos) {
-        path.replace(position, needle.size(), L"air_companion_tray.exe");
+        path.replace(position, needle.size(), L"air_companion_helper.exe");
     }
     return path;
 }
@@ -515,7 +516,7 @@ models::ActivitySnapshot WindowsAppTrackerAdapter::collectInteractiveSnapshot() 
 
 std::optional<models::ActivitySnapshot> WindowsAppTrackerAdapter::captureViaActiveSessionHelper() const {
 #ifdef _WIN32
-    const auto helperPath = trayBinaryPath();
+    const auto helperPath = helperBinaryPath();
     if (helperPath.empty() || !std::filesystem::exists(helperPath)) {
         return std::nullopt;
     }

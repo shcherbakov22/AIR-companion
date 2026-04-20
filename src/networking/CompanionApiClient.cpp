@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <charconv>
 #include <utility>
 
 namespace companion::networking {
@@ -118,6 +119,35 @@ std::optional<int> extractJsonInt(const std::string& body, const std::string& ke
 
     const auto numberEnd = body.find_first_not_of("0123456789", numberStart + 1);
     return std::stoi(body.substr(numberStart, numberEnd - numberStart));
+}
+
+std::optional<std::uint64_t> extractJsonUInt64(const std::string& body, const std::string& key) {
+    const auto keyPos = body.find("\"" + key + "\"");
+    if (keyPos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const auto colonPos = body.find(':', keyPos);
+    if (colonPos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const auto numberStart = body.find_first_of("0123456789", colonPos + 1);
+    if (numberStart == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const auto numberEnd = body.find_first_not_of("0123456789", numberStart);
+    const auto token = body.substr(numberStart, numberEnd - numberStart);
+    std::uint64_t value = 0;
+    const auto* begin = token.data();
+    const auto* end = begin + token.size();
+    const auto result = std::from_chars(begin, end, value);
+    if (result.ec != std::errc{} || result.ptr != end) {
+        return std::nullopt;
+    }
+
+    return value;
 }
 
 std::optional<std::string> extractJsonObject(const std::string& body, const std::string& key) {
@@ -671,6 +701,7 @@ std::optional<models::UpdateManifest> CompanionApiClient::fetchUpdateManifest() 
     manifest.mandatory = extractJsonBool(response.body, "mandatory");
     manifest.downloadUrl = extractJsonString(response.body, "download_url").value_or({});
     manifest.sha256 = extractJsonString(response.body, "sha256").value_or({});
+    manifest.sizeBytes = extractJsonUInt64(response.body, "size_bytes").value_or(0);
 
     if (!manifest.available || manifest.version.empty() || manifest.downloadUrl.empty() || manifest.sha256.empty()) {
         return std::nullopt;

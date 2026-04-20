@@ -104,11 +104,11 @@ bool configureSerialPort(HANDLE handle) {
     return true;
 }
 
-bool readChunk(HANDLE handle, std::string& buffer, std::chrono::steady_clock::time_point& lastComm) {
+int readChunk(HANDLE handle, std::string& buffer, std::chrono::steady_clock::time_point& lastComm) {
     char chunk[256]{};
     DWORD bytesRead = 0;
     if (!ReadFile(handle, chunk, static_cast<DWORD>(sizeof(chunk)), &bytesRead, nullptr)) {
-        return false;
+        return -1;
     }
 
     if (bytesRead > 0) {
@@ -116,7 +116,7 @@ bool readChunk(HANDLE handle, std::string& buffer, std::chrono::steady_clock::ti
         lastComm = std::chrono::steady_clock::now();
     }
 
-    return true;
+    return static_cast<int>(bytesRead);
 }
 
 bool isFirmwareFrame(const std::string& line) {
@@ -155,6 +155,9 @@ bool WindowsPushUpCounterAdapter::startSession(const std::string& sessionId, int
     m_state.currentRep = 0;
     m_state.currentSet = 1;
     m_state.completionPending = false;
+    m_state.searchingBack = false;
+    m_state.working = false;
+    m_state.status = "ready";
     const std::string command = pushUpTestModeEnabled()
         ? ("TEST " + sessionId + " " + std::to_string(totalReps) + " 80")
         : ("START " + sessionId + " " + std::to_string(totalReps) + " " + std::to_string(dropThreshold) + " " + std::to_string(upGap) + " " + std::to_string(downTolerance));
@@ -164,7 +167,11 @@ bool WindowsPushUpCounterAdapter::startSession(const std::string& sessionId, int
     }
 
     pumpIncomingFor(kLaunchPumpDuration);
-    return true;
+    return m_state.searchingBack
+        || m_state.working
+        || m_state.currentRep > 0
+        || m_state.completionPending
+        || m_state.status == "complete";
 #else
     (void) sessionId;
     (void) totalReps;
@@ -185,6 +192,12 @@ bool WindowsPushUpCounterAdapter::abortSession(const std::string& sessionId) {
 #else
     (void) sessionId;
     return false;
+#endif
+}
+
+void WindowsPushUpCounterAdapter::hardReset() {
+#ifdef _WIN32
+    hardResetArduino();
 #endif
 }
 
@@ -239,7 +252,7 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
         const auto deadline = std::chrono::steady_clock::now() + kProbeTimeout;
         bool matched = false;
         while (std::chrono::steady_clock::now() < deadline) {
-            if (!readChunk(candidate, probeBuffer, m_lastCommunicationAt)) {
+            if (readChunk(candidate, probeBuffer, m_lastCommunicationAt) < 0) {
                 break;
             }
 
@@ -302,23 +315,47 @@ void WindowsPushUpCounterAdapter::disconnect() {
     m_lastCommunicationAt = {};
 }
 
+void WindowsPushUpCounterAdapter::hardResetArduino() {
+#ifdef _WIN32
+    if (m_handle == nullptr || static_cast<HANDLE>(m_handle) == invalidHandle()) {
+        return;
+    }
+
+    appendDebugLog("push-up counter hard reset via DTR");
+    EscapeCommFunction(static_cast<HANDLE>(m_handle), CLRDTR);
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    EscapeCommFunction(static_cast<HANDLE>(m_handle), SETDTR);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    disconnect();
+#endif
+}
+
 void WindowsPushUpCounterAdapter::processIncoming() {
 #ifdef _WIN32
     if (m_handle == nullptr || static_cast<HANDLE>(m_handle) == invalidHandle()) {
         return;
     }
 
-    if (!readChunk(static_cast<HANDLE>(m_handle), m_buffer, m_lastCommunicationAt)) {
-        appendDebugLog("push-up counter read failed, disconnecting");
-        disconnect();
-        return;
-    }
+    // The firmware emits DIST telemetry every 50ms. Reading a single small
+    // chunk per service tick can leave completion frames stuck behind telemetry.
+    for (int reads = 0; reads < 64; ++reads) {
+        const int bytesRead = readChunk(static_cast<HANDLE>(m_handle), m_buffer, m_lastCommunicationAt);
+        if (bytesRead < 0) {
+            appendDebugLog("push-up counter read failed, disconnecting");
+            disconnect();
+            return;
+        }
 
-    std::size_t newline = std::string::npos;
-    while ((newline = m_buffer.find('\n')) != std::string::npos) {
-        auto line = trimLine(m_buffer.substr(0, newline));
-        m_buffer.erase(0, newline + 1);
-        parseLine(line);
+        std::size_t newline = std::string::npos;
+        while ((newline = m_buffer.find('\n')) != std::string::npos) {
+            auto line = trimLine(m_buffer.substr(0, newline));
+            m_buffer.erase(0, newline + 1);
+            parseLine(line);
+        }
+
+        if (bytesRead == 0) {
+            break;
+        }
     }
 #endif
 }
@@ -397,6 +434,14 @@ void WindowsPushUpCounterAdapter::parseLine(const std::string& line) {
         m_state.status = "idle";
         return;
     }
+
+    if (line.rfind("STATE ERROR ", 0) == 0) {
+        appendDebugLog("push-up counter recv: " + line);
+        m_state.searchingBack = false;
+        m_state.working = false;
+        m_state.status = "error";
+        return;
+    }
 #endif
 }
 
@@ -466,7 +511,7 @@ void WindowsPushUpCounterAdapter::checkInactivityReset() {
 void WindowsPushUpCounterAdapter::resetAfterInactivity() {
 #ifdef _WIN32
     appendDebugLog("push-up counter manual inactivity reset");
-    disconnect();
+    hardResetArduino();
 #endif
 }
 

@@ -30,8 +30,8 @@ namespace {
 constexpr DWORD kCameraWarmupMilliseconds = 1500;
 constexpr int kDiscardedWarmupFrames = 6;
 constexpr int kMaxFrameAttempts = 40;
-constexpr INT kOutputWidth = 1920;
-constexpr INT kOutputHeight = 1080;
+constexpr INT kOutputWidth = 1493;
+constexpr INT kOutputHeight = 840;
 constexpr ULONG kJpegQuality = 88;
 
 

@@ -54,8 +54,9 @@ std::wstring utf8ToWide(const std::string& value) {
         return {};
     }
 
-    std::wstring result(static_cast<std::size_t>(required - 1), L'\0');
+    std::wstring result(static_cast<std::size_t>(required), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, result.data(), required);
+    result.resize(static_cast<std::size_t>(required - 1));
     return result;
 }
 
@@ -158,13 +159,7 @@ bool startService(const std::wstring& serviceName) {
     return true;
 }
 
-bool extractArchive(const std::filesystem::path& archivePath, const std::filesystem::path& destinationPath) {
-    std::wstring commandLine = L"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Expand-Archive -LiteralPath '"
-        + archivePath.wstring()
-        + L"' -DestinationPath '"
-        + destinationPath.wstring()
-        + L"' -Force\"";
-
+bool runHiddenAndWait(std::wstring commandLine, DWORD timeoutMs) {
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
     PROCESS_INFORMATION processInformation{};
@@ -185,14 +180,49 @@ bool extractArchive(const std::filesystem::path& archivePath, const std::filesys
         return false;
     }
 
-    WaitForSingleObject(processInformation.hProcess, INFINITE);
+    const auto waitResult = WaitForSingleObject(processInformation.hProcess, timeoutMs);
     DWORD exitCode = 1;
-    GetExitCodeProcess(processInformation.hProcess, &exitCode);
+    if (waitResult == WAIT_TIMEOUT) {
+        TerminateProcess(processInformation.hProcess, 1);
+    } else {
+        GetExitCodeProcess(processInformation.hProcess, &exitCode);
+    }
+
     CloseHandle(processInformation.hThread);
     CloseHandle(processInformation.hProcess);
-    return exitCode == 0;
+    return waitResult != WAIT_TIMEOUT && exitCode == 0;
+}
+
+void stopCompanionUserProcesses() {
+    runHiddenAndWait(L"taskkill.exe /IM air_companion_tray.exe /F /T", 10000);
+    runHiddenAndWait(L"taskkill.exe /IM air_companion_helper.exe /F /T", 10000);
+}
+
+bool extractArchive(const std::filesystem::path& archivePath, const std::filesystem::path& destinationPath) {
+    std::wstring commandLine = L"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Expand-Archive -LiteralPath '"
+        + archivePath.wstring()
+        + L"' -DestinationPath '"
+        + destinationPath.wstring()
+        + L"' -Force\"";
+
+    return runHiddenAndWait(std::move(commandLine), 120000);
 }
 #endif
+
+bool copyFileWithRetry(const std::filesystem::path& sourcePath, const std::filesystem::path& targetPath) {
+    std::error_code errorCode;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        std::filesystem::copy_file(sourcePath, targetPath, std::filesystem::copy_options::overwrite_existing, errorCode);
+        if (!errorCode) {
+            return true;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        errorCode.clear();
+    }
+
+    return false;
+}
 
 bool copyExtractedFiles(const std::filesystem::path& sourceRoot, const std::filesystem::path& targetRoot) {
     std::error_code errorCode;
@@ -221,8 +251,7 @@ bool copyExtractedFiles(const std::filesystem::path& sourceRoot, const std::file
             return false;
         }
 
-        std::filesystem::copy_file(entry.path(), targetPath, std::filesystem::copy_options::overwrite_existing, errorCode);
-        if (errorCode) {
+        if (!copyFileWithRetry(entry.path(), targetPath)) {
             return false;
         }
     }
@@ -248,16 +277,19 @@ int main(int argc, char** argv) {
     if (!stopService(serviceName)) {
         return 1;
     }
+    stopCompanionUserProcesses();
 
     const auto extractDirectory = std::filesystem::temp_directory_path() / "AIRCompanion" / "UpdateExtract";
     std::error_code errorCode;
     std::filesystem::remove_all(extractDirectory, errorCode);
     std::filesystem::create_directories(extractDirectory, errorCode);
     if (errorCode) {
+        startService(serviceName);
         return 1;
     }
 
     if (!extractArchive(options->packagePath, extractDirectory)) {
+        startService(serviceName);
         return 1;
     }
 
@@ -274,6 +306,7 @@ int main(int argc, char** argv) {
     }
 
     if (!copyExtractedFiles(sourceRoot, options->targetDirectory)) {
+        startService(serviceName);
         return 1;
     }
 

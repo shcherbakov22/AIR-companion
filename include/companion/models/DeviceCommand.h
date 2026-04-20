@@ -8,6 +8,7 @@ enum class DeviceCommandType {
     RefreshPolicy,
     RequestScreenshot,
     RequestCameraCapture,
+    ShowMessage,
     LockInternet,
     UnlockInternet,
     VerifyRemoteControl,

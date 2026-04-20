@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(AIRCompanion VERSION 0.1.10 LANGUAGES CXX)
+project(AIRCompanion VERSION 0.1.17 LANGUAGES CXX)
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
@@ -12,9 +12,14 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
+if(MINGW)
+    add_link_options(-static -static-libgcc -static-libstdc++)
+endif()
+
 include(FetchContent)
 
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(WITH_TESTS OFF CACHE BOOL "" FORCE)
 set(WITH_ZLIB OFF CACHE BOOL "" FORCE)
 set(WITH_OPENSSL OFF CACHE BOOL "" FORCE)
 set(WITH_GNUTLS OFF CACHE BOOL "" FORCE)
@@ -88,6 +93,9 @@ target_link_libraries(air_companion_service PRIVATE air_companion_core)
 
 add_executable(air_companion_tray src/tray/main.cpp)
 target_link_libraries(air_companion_tray PRIVATE air_companion_core)
+
+add_executable(air_companion_helper src/helper/main.cpp)
+target_link_libraries(air_companion_helper PRIVATE air_companion_core)
 
 add_executable(air_companion_updater src/updater/main.cpp)
 target_link_libraries(air_companion_updater PRIVATE air_companion_core)
