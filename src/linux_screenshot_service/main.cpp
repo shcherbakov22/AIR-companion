@@ -149,7 +149,7 @@ bool captureAndUpload(companion::adapters::linux::LinuxScreenCaptureAdapter& cap
         return false;
     }
 
-    const auto uploaded = api.uploadScreenCapture(deviceToken, *path, linuxSnapshot(), "image/png");
+    const auto uploaded = api.uploadScreenCapture(deviceToken, *path, linuxSnapshot(), "image/jpeg");
     std::cout << "screen capture " << (uploaded ? "uploaded" : "upload failed") << ": " << *path << '\n';
     return uploaded;
 }

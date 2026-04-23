@@ -8,6 +8,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace companion::adapters::linux {
@@ -63,6 +64,97 @@ bool hasUsableFile(const std::filesystem::path& path) {
     return std::filesystem::exists(path, errorCode)
         && std::filesystem::is_regular_file(path, errorCode)
         && std::filesystem::file_size(path, errorCode) > 0;
+}
+
+int runCaptureCommand(const std::string& command);
+
+bool waitForStableFile(const std::filesystem::path& path) {
+    std::error_code errorCode;
+    std::uintmax_t previousSize = 0;
+    int stableChecks = 0;
+
+    for (int attempt = 0; attempt < 12; ++attempt) {
+        if (!std::filesystem::exists(path, errorCode) || !std::filesystem::is_regular_file(path, errorCode)) {
+            stableChecks = 0;
+            previousSize = 0;
+        } else {
+            const auto currentSize = std::filesystem::file_size(path, errorCode);
+            if (!errorCode && currentSize > 0 && currentSize == previousSize) {
+                ++stableChecks;
+                if (stableChecks >= 2) {
+                    return true;
+                }
+            } else {
+                stableChecks = 0;
+                previousSize = errorCode ? 0 : currentSize;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    return hasUsableFile(path);
+}
+
+int runImageProcessCommand(const std::string& command) {
+    const auto boundedCommand = commandExists("timeout")
+        ? "timeout 60s " + command
+        : command;
+    return std::system((boundedCommand + " >/dev/null 2>&1").c_str());
+}
+
+std::optional<std::filesystem::path> convertToJpeg840p(const std::filesystem::path& sourcePath) {
+    if (!waitForStableFile(sourcePath)) {
+        appendDebugLog("capture convert aborted: source file did not stabilize path=" + sourcePath.string());
+        return std::nullopt;
+    }
+
+    const auto targetPath = sourcePath.parent_path() / (sourcePath.stem().string() + ".jpg");
+    const auto quotedSource = shellQuote(sourcePath.string());
+    const auto quotedTarget = shellQuote(targetPath.string());
+
+    struct Candidate {
+        std::string binary;
+        std::string command;
+    };
+
+    const std::vector<Candidate> candidates{
+        {
+            "ffmpeg",
+            "ffmpeg -y -threads 1 -i " + quotedSource
+                + " -vf \"scale=-2:840:force_original_aspect_ratio=decrease:flags=lanczos\""
+                + " -frames:v 1 -update 1 -q:v 5 " + quotedTarget,
+        },
+        {
+            "magick",
+            "magick " + quotedSource + " -resize x840\\> -strip -sampling-factor 4:2:0 -quality 82 " + quotedTarget,
+        },
+        {
+            "convert",
+            "convert " + quotedSource + " -resize x840\\> -strip -sampling-factor 4:2:0 -quality 82 " + quotedTarget,
+        },
+    };
+
+    std::error_code errorCode;
+    for (const auto& candidate : candidates) {
+        if (!commandExists(candidate.binary)) {
+            continue;
+        }
+
+        appendDebugLog("capture converting with " + candidate.binary);
+        const auto result = runImageProcessCommand(candidate.command);
+        if (result == 0 && hasUsableFile(targetPath)) {
+            std::filesystem::remove(sourcePath, errorCode);
+            appendDebugLog("capture converted path=" + targetPath.string());
+            return targetPath;
+        }
+
+        std::filesystem::remove(targetPath, errorCode);
+        appendDebugLog("capture convert failed binary=" + candidate.binary + " result=" + std::to_string(result));
+    }
+
+    appendDebugLog("capture convert failed: no supported image converter succeeded");
+    return std::nullopt;
 }
 
 int runCaptureCommand(const std::string& command) {
@@ -186,8 +278,8 @@ std::optional<std::string> LinuxScreenCaptureAdapter::captureToFile(const std::s
         return std::nullopt;
     }
 
-    const auto outputPath = directory / ("screen-" + timestampSuffix() + ".png");
-    const auto quotedOutput = shellQuote(outputPath.string());
+    const auto rawOutputPath = directory / ("screen-" + timestampSuffix() + ".png");
+    const auto quotedOutput = shellQuote(rawOutputPath.string());
 
     struct Candidate {
         std::string binary;
@@ -210,12 +302,15 @@ std::optional<std::string> LinuxScreenCaptureAdapter::captureToFile(const std::s
 
         appendDebugLog("capture trying " + candidate.binary);
         const auto result = runCaptureCommand(wrapForFirstKdeDesktop(candidate.command));
-        if (result == 0 && hasUsableFile(outputPath)) {
-            appendDebugLog("capture succeeded path=" + outputPath.string());
-            return outputPath.string();
+        if (result == 0 && hasUsableFile(rawOutputPath)) {
+            const auto convertedPath = convertToJpeg840p(rawOutputPath);
+            if (convertedPath.has_value()) {
+                appendDebugLog("capture succeeded path=" + convertedPath->string());
+                return convertedPath->string();
+            }
         }
 
-        std::filesystem::remove(outputPath, errorCode);
+        std::filesystem::remove(rawOutputPath, errorCode);
         appendDebugLog("capture failed binary=" + candidate.binary + " result=" + std::to_string(result));
     }
 
