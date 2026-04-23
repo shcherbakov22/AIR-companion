@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <array>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -71,6 +72,109 @@ int runCaptureCommand(const std::string& command) {
     return std::system((boundedCommand + " >/dev/null 2>&1").c_str());
 }
 
+std::optional<std::string> commandOutput(const std::string& command) {
+    std::array<char, 512> buffer{};
+    std::string output;
+
+    FILE* pipe = popen((command + " 2>/dev/null").c_str(), "r");
+    if (pipe == nullptr) {
+        return std::nullopt;
+    }
+
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+        output += buffer.data();
+    }
+
+    if (pclose(pipe) != 0) {
+        return std::nullopt;
+    }
+
+    while (!output.empty() && (output.back() == '\n' || output.back() == '\r' || output.back() == ' ' || output.back() == '\t')) {
+        output.pop_back();
+    }
+
+    return output.empty() ? std::nullopt : std::optional<std::string>(output);
+}
+
+bool isKdeSession() {
+    const auto* currentDesktop = std::getenv("XDG_CURRENT_DESKTOP");
+    if (currentDesktop != nullptr) {
+        const std::string value(currentDesktop);
+        if (value.find("KDE") != std::string::npos || value.find("PLASMA") != std::string::npos) {
+            return true;
+        }
+    }
+
+    const auto* kdeFullSession = std::getenv("KDE_FULL_SESSION");
+    return kdeFullSession != nullptr && std::string(kdeFullSession) == "true";
+}
+
+std::optional<std::string> kdeDesktopCommand() {
+    if (!isKdeSession()) {
+        return std::nullopt;
+    }
+
+    const std::vector<std::string> candidates{
+        "qdbus6 org.kde.KWin /KWin",
+        "qdbus org.kde.KWin /KWin",
+        "dbus-send --session --print-reply=literal --dest=org.kde.KWin /KWin",
+    };
+
+    for (const auto& candidate : candidates) {
+        const auto executable = candidate.substr(0, candidate.find(' '));
+        if (commandExists(executable)) {
+            return candidate;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<int> currentKdeDesktop() {
+    const auto dbusCommand = kdeDesktopCommand();
+    if (!dbusCommand.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto output = commandOutput(*dbusCommand + " org.kde.KWin.currentDesktop");
+    if (!output.has_value()) {
+        return std::nullopt;
+    }
+
+    try {
+        return std::stoi(*output);
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::string wrapForFirstKdeDesktop(const std::string& command) {
+    const auto dbusCommand = kdeDesktopCommand();
+    const auto currentDesktop = currentKdeDesktop();
+    if (!dbusCommand.has_value() || !currentDesktop.has_value() || *currentDesktop <= 0) {
+        return command;
+    }
+
+    if (*currentDesktop == 1) {
+        return command;
+    }
+
+    appendDebugLog("capture switching KDE desktop from " + std::to_string(*currentDesktop) + " to 1");
+
+    std::ostringstream script;
+    script
+        << "current_desktop=" << *currentDesktop << ";"
+        << "cleanup(){ " << *dbusCommand << " org.kde.KWin.setCurrentDesktop \"$current_desktop\" >/dev/null 2>&1 || true; };"
+        << "trap cleanup EXIT;"
+        << *dbusCommand << " org.kde.KWin.setCurrentDesktop 1 >/dev/null 2>&1 || exit 1;"
+        << "sleep 0.35;"
+        << command << ";"
+        << "status=$?;"
+        << "exit $status";
+
+    return "bash -lc " + shellQuote(script.str());
+}
+
 }  // namespace
 
 std::optional<std::string> LinuxScreenCaptureAdapter::captureToFile(const std::string& outputDirectory) {
@@ -105,7 +209,7 @@ std::optional<std::string> LinuxScreenCaptureAdapter::captureToFile(const std::s
         }
 
         appendDebugLog("capture trying " + candidate.binary);
-        const auto result = runCaptureCommand(candidate.command);
+        const auto result = runCaptureCommand(wrapForFirstKdeDesktop(candidate.command));
         if (result == 0 && hasUsableFile(outputPath)) {
             appendDebugLog("capture succeeded path=" + outputPath.string());
             return outputPath.string();
