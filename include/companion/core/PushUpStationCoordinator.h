@@ -42,6 +42,7 @@ private:
     int m_pendingCount{0};
     bool m_startSynced{false};
     std::chrono::steady_clock::time_point m_lastHeartbeatAt{};
+    std::chrono::steady_clock::time_point m_lastStartSyncAttemptAt{};
     std::chrono::steady_clock::time_point m_lastMeaningfulActivityAt{};
     std::string m_status{"push-up idle"};
 };

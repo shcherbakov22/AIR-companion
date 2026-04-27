@@ -1171,6 +1171,56 @@ void testPushUpCoordinatorRetriesCompletionAfterApiFailure() {
     require(!adapter.completionPending(), "completion flag should clear after successful completion sync");
 }
 
+void testPushUpCoordinatorRetriesStartSyncAfterApiFailure() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev123";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-start-retry";
+    session.requiredPushUps = 5;
+    session.dropThreshold = 3;
+    session.upGap = 80;
+    session.downTolerance = 150;
+    session.status = "claimed";
+
+    api.setClaimNextResponse(session);
+    api.setStartResponse(false);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+
+    coordinator.tick();
+    coordinator.tick();
+
+    int startCalls = 0;
+    for (const auto& call : api.calls()) {
+        if (call.kind == PushUpStationApiCall::Kind::Start) {
+            ++startCalls;
+        }
+    }
+    requireEqual(startCalls, 1, "start sync should be attempted once after launch");
+
+    api.setStartResponse(true);
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    coordinator.tick();
+
+    startCalls = 0;
+    for (const auto& call : api.calls()) {
+        if (call.kind == PushUpStationApiCall::Kind::Start) {
+            ++startCalls;
+        }
+    }
+    requireEqual(startCalls, 2, "start sync should retry after an API failure");
+}
+
 void testPushUpCoordinatorFailsSessionOnDisconnect() {
     using namespace companion;
     using namespace companion::core;
@@ -1512,6 +1562,7 @@ int main() {
         {"pushUpCoordinatorSyncsProgressOnRepIncrement", testPushUpCoordinatorSyncsProgressOnRepIncrement},
         {"pushUpCoordinatorSyncsCompletionOnFinish",   testPushUpCoordinatorSyncsCompletionOnFinish},
         {"pushUpCoordinatorRetriesCompletionAfterApiFailure", testPushUpCoordinatorRetriesCompletionAfterApiFailure},
+        {"pushUpCoordinatorRetriesStartSyncAfterApiFailure", testPushUpCoordinatorRetriesStartSyncAfterApiFailure},
         {"pushUpCoordinatorFailsSessionOnDisconnect",   testPushUpCoordinatorFailsSessionOnDisconnect},
         {"pushUpCoordinatorAbortsHardwareWhenTimingOutSession", testPushUpCoordinatorAbortsHardwareWhenTimingOutSession},
         {"pushUpCoordinatorClearsStaleSessionWhenHeartbeatStopsReturningIt", testPushUpCoordinatorClearsStaleSessionWhenHeartbeatStopsReturningIt},

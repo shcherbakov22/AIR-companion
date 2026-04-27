@@ -10,6 +10,7 @@ namespace companion::core {
 namespace {
 constexpr auto kHeartbeatInterval = std::chrono::seconds(5);
 constexpr auto kSessionIdleTimeout = std::chrono::seconds(30);
+constexpr auto kStartSyncRetryInterval = std::chrono::seconds(2);
 
 void appendDebugLog(const std::string& line) {
     const char* appData = std::getenv("APPDATA");
@@ -52,6 +53,7 @@ void PushUpStationCoordinator::tick() {
         m_session.reset();
         m_launchedSessionId.clear();
         m_startSynced = false;
+        m_lastStartSyncAttemptAt = {};
         m_lastProgressRep = 0;
         m_status = "push-up disconnected";
         return;
@@ -119,6 +121,7 @@ void PushUpStationCoordinator::syncHeartbeat() {
         m_session.reset();
         m_launchedSessionId.clear();
         m_startSynced = false;
+        m_lastStartSyncAttemptAt = {};
         m_lastProgressRep = 0;
         m_lastMeaningfulActivityAt = {};
     }
@@ -134,6 +137,7 @@ void PushUpStationCoordinator::ensureSessionClaimed() {
         appendDebugLog("push-up session claimed: " + m_session->id + " reps=" + std::to_string(m_session->requiredPushUps));
         m_launchedSessionId.clear();
         m_startSynced = false;
+        m_lastStartSyncAttemptAt = {};
         m_lastProgressRep = 0;
         m_lastMeaningfulActivityAt = {};
     }
@@ -144,29 +148,37 @@ void PushUpStationCoordinator::ensureSessionLaunched() {
         return;
     }
 
-    if (m_launchedSessionId == m_session->id) {
+    if (m_launchedSessionId != m_session->id) {
+        if (!m_adapter.startSession(
+            m_session->id,
+            m_session->requiredPushUps,
+            m_session->dropThreshold,
+            m_session->upGap,
+            m_session->downTolerance
+        )) {
+            return;
+        }
+
+        appendDebugLog("push-up session launched locally: " + m_session->id);
+        m_launchedSessionId = m_session->id;
+        m_lastProgressRep = 0;
+        m_lastMeaningfulActivityAt = std::chrono::steady_clock::now();
+        m_lastStartSyncAttemptAt = {};
+    }
+
+    if (m_startSynced) {
         return;
     }
 
-    if (!m_adapter.startSession(
-        m_session->id,
-        m_session->requiredPushUps,
-        m_session->dropThreshold,
-        m_session->upGap,
-        m_session->downTolerance
-    )) {
+    const auto now = std::chrono::steady_clock::now();
+    if (m_lastStartSyncAttemptAt.time_since_epoch().count() != 0
+        && (now - m_lastStartSyncAttemptAt) < kStartSyncRetryInterval) {
         return;
     }
 
-    appendDebugLog("push-up session launched locally: " + m_session->id);
-    m_launchedSessionId = m_session->id;
-    m_lastProgressRep = 0;
-    m_lastMeaningfulActivityAt = std::chrono::steady_clock::now();
-
-    if (!m_startSynced) {
-        m_startSynced = m_apiClient.pushUpStationStart(m_deviceToken, m_stationKey, m_session->id);
-        appendDebugLog(std::string("push-up session start sync ") + (m_startSynced ? "ok: " : "failed: ") + m_session->id);
-    }
+    m_lastStartSyncAttemptAt = now;
+    m_startSynced = m_apiClient.pushUpStationStart(m_deviceToken, m_stationKey, m_session->id);
+    appendDebugLog(std::string("push-up session start sync ") + (m_startSynced ? "ok: " : "failed: ") + m_session->id);
 }
 
 void PushUpStationCoordinator::syncProgress() {
@@ -208,6 +220,7 @@ bool PushUpStationCoordinator::syncCompletion() {
         m_session.reset();
         m_launchedSessionId.clear();
         m_startSynced = false;
+        m_lastStartSyncAttemptAt = {};
         m_lastProgressRep = 0;
         m_lastMeaningfulActivityAt = {};
     } else {
@@ -231,6 +244,7 @@ void PushUpStationCoordinator::failActiveSession(const std::string& notes) {
     m_session.reset();
     m_launchedSessionId.clear();
     m_startSynced = false;
+    m_lastStartSyncAttemptAt = {};
     m_lastProgressRep = 0;
     m_lastMeaningfulActivityAt = {};
 }
