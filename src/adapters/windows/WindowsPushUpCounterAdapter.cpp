@@ -11,8 +11,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -24,32 +26,72 @@ constexpr int kBaudRate = 115200;
 constexpr auto kScanInterval = std::chrono::seconds(5);
 constexpr auto kProbeTimeout = std::chrono::milliseconds(8500);
 constexpr auto kLaunchPumpDuration = std::chrono::milliseconds(2500);
+constexpr int kMaxLoggedOpenFailuresPerScan = 12;
 
 bool pushUpTestModeEnabled() {
     const char* value = std::getenv("AIR_PUSHUP_COUNTER_TEST_MODE");
     return value != nullptr && *value != '\0' && std::string(value) != "0";
 }
 
+std::filesystem::path debugLogPath() {
+#ifdef _WIN32
+    if (const char* programData = std::getenv("ProgramData"); programData != nullptr && *programData != '\0') {
+        return std::filesystem::path(programData) / "AIRCompanion" / "Logs" / "debug.log";
+    }
+#endif
+    if (const char* appData = std::getenv("APPDATA"); appData != nullptr && *appData != '\0') {
+        return std::filesystem::path(appData) / "AIRCompanion" / "debug.log";
+    }
+    return std::filesystem::path(".") / "AIRCompanion" / "Logs" / "debug.log";
+}
+
+std::string timestamp() {
+    const auto now = std::chrono::system_clock::now();
+    const auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime{};
+#ifdef _WIN32
+    localtime_s(&localTime, &time);
+#else
+    localtime_r(&time, &localTime);
+#endif
+    char buffer[32]{};
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &localTime);
+    return buffer;
+}
+
 void appendDebugLog(const std::string& line) {
 #ifdef _WIN32
-    const char* appData = std::getenv("APPDATA");
-    if (appData == nullptr || *appData == '\0') {
-        return;
-    }
-
-    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
+    const auto logPath = debugLogPath();
     std::error_code errorCode;
-    std::filesystem::create_directories(logDirectory, errorCode);
+    std::filesystem::create_directories(logPath.parent_path(), errorCode);
 
-    std::ofstream output(logDirectory / "debug.log", std::ios::app);
+    std::ofstream output(logPath, std::ios::app);
     if (!output.is_open()) {
         return;
     }
 
-    output << line << '\n';
+    output << timestamp() << " " << line << '\n';
 #else
     (void) line;
 #endif
+}
+
+std::string stateSummary(const PushUpCounterState& state) {
+    std::ostringstream output;
+    output << "connected=" << (state.connected ? "1" : "0")
+           << " firmwareReady=" << (state.firmwareReady ? "1" : "0")
+           << " port=" << (state.portName.empty() ? "-" : state.portName)
+           << " status=" << state.status
+           << " distance=" << state.distance
+           << " rep=" << state.currentRep
+           << " set=" << state.currentSet
+           << " searchingBack=" << (state.searchingBack ? "1" : "0")
+           << " working=" << (state.working ? "1" : "0")
+           << " completionPending=" << (state.completionPending ? "1" : "0");
+    if (!state.errorMessage.empty()) {
+        output << " error=" << state.errorMessage;
+    }
+    return output.str();
 }
 
 #ifdef _WIN32
@@ -179,6 +221,7 @@ std::vector<std::string> enumerateComPorts() {
 void WindowsPushUpCounterAdapter::tick() {
 #ifdef _WIN32
     if (!connectIfNeeded()) {
+        appendDebugLog("push-up counter tick: not connected state=" + stateSummary(m_state));
         return;
     }
 
@@ -194,29 +237,42 @@ const PushUpCounterState& WindowsPushUpCounterAdapter::state() const {
 bool WindowsPushUpCounterAdapter::startSession(const std::string& sessionId, int totalReps, int dropThreshold, int upGap, int downTolerance) {
 #ifdef _WIN32
     if (!connectIfNeeded()) {
+        appendDebugLog("push-up counter start rejected: no serial connection session=" + sessionId);
         return false;
     }
 
+    appendDebugLog("push-up counter start prepare: session=" + sessionId
+        + " totalReps=" + std::to_string(totalReps)
+        + " drop=" + std::to_string(dropThreshold)
+        + " upGap=" + std::to_string(upGap)
+        + " downTolerance=" + std::to_string(downTolerance)
+        + " stateBefore=" + stateSummary(m_state));
     m_state.currentRep = 0;
     m_state.currentSet = 1;
     m_state.completionPending = false;
     m_state.searchingBack = false;
     m_state.working = false;
     m_state.status = "ready";
+    m_state.errorMessage.clear();
     const std::string command = pushUpTestModeEnabled()
         ? ("TEST " + sessionId + " " + std::to_string(totalReps) + " 80")
         : ("START " + sessionId + " " + std::to_string(totalReps) + " " + std::to_string(dropThreshold) + " " + std::to_string(upGap) + " " + std::to_string(downTolerance));
     appendDebugLog("push-up counter send: " + command);
     if (!sendLine(command)) {
+        appendDebugLog("push-up counter start send failed: session=" + sessionId);
         return false;
     }
 
     pumpIncomingFor(kLaunchPumpDuration);
-    return m_state.searchingBack
+    const bool started = m_state.searchingBack
         || m_state.working
         || m_state.currentRep > 0
         || m_state.completionPending
         || m_state.status == "complete";
+    appendDebugLog("push-up counter start result: session=" + sessionId
+        + " started=" + std::string(started ? "1" : "0")
+        + " stateAfter=" + stateSummary(m_state));
+    return started;
 #else
     (void) sessionId;
     (void) totalReps;
@@ -230,10 +286,14 @@ bool WindowsPushUpCounterAdapter::startSession(const std::string& sessionId, int
 bool WindowsPushUpCounterAdapter::abortSession(const std::string& sessionId) {
 #ifdef _WIN32
     if (!connectIfNeeded()) {
+        appendDebugLog("push-up counter abort rejected: no serial connection session=" + sessionId);
         return false;
     }
 
-    return sendLine("ABORT " + sessionId);
+    appendDebugLog("push-up counter abort send: session=" + sessionId + " stateBefore=" + stateSummary(m_state));
+    const bool ok = sendLine("ABORT " + sessionId);
+    appendDebugLog("push-up counter abort result: session=" + sessionId + " ok=" + std::string(ok ? "1" : "0"));
+    return ok;
 #else
     (void) sessionId;
     return false;
@@ -248,10 +308,12 @@ void WindowsPushUpCounterAdapter::hardReset() {
 
 bool WindowsPushUpCounterAdapter::consumeCompletion() {
     if (!m_state.completionPending) {
+        appendDebugLog("push-up counter consumeCompletion ignored: no pending completion state=" + stateSummary(m_state));
         return false;
     }
 
     m_state.completionPending = false;
+    appendDebugLog("push-up counter completion consumed state=" + stateSummary(m_state));
     return true;
 }
 
@@ -267,7 +329,10 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
     }
     m_lastScanAt = now;
 
-    for (const std::string& port : enumerateComPorts()) {
+    const auto ports = enumerateComPorts();
+    appendDebugLog("push-up counter scan start ports=" + std::to_string(ports.size()));
+    int loggedOpenFailures = 0;
+    for (const std::string& port : ports) {
         HANDLE candidate = CreateFileA(
             portPath(port).c_str(),
             GENERIC_READ | GENERIC_WRITE,
@@ -279,11 +344,15 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
         );
 
         if (candidate == invalidHandle()) {
+            if (loggedOpenFailures < kMaxLoggedOpenFailuresPerScan) {
+                appendDebugLog("push-up counter open failed on " + port + " error=" + std::to_string(GetLastError()));
+                ++loggedOpenFailures;
+            }
             continue;
         }
 
         if (!configureSerialPort(candidate)) {
-            appendDebugLog("push-up counter probe configure failed on " + port);
+            appendDebugLog("push-up counter probe configure failed on " + port + " error=" + std::to_string(GetLastError()));
             CloseHandle(candidate);
             continue;
         }
@@ -292,13 +361,19 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         const std::string ping = "PING\n";
         DWORD bytesWritten = 0;
-        WriteFile(candidate, ping.data(), static_cast<DWORD>(ping.size()), &bytesWritten, nullptr);
+        if (!WriteFile(candidate, ping.data(), static_cast<DWORD>(ping.size()), &bytesWritten, nullptr)) {
+            appendDebugLog("push-up counter probe PING write failed on " + port + " error=" + std::to_string(GetLastError()));
+            CloseHandle(candidate);
+            continue;
+        }
+        appendDebugLog("push-up counter probe PING wrote bytes=" + std::to_string(bytesWritten) + " port=" + port);
 
         std::string probeBuffer;
         const auto deadline = std::chrono::steady_clock::now() + kProbeTimeout;
         bool matched = false;
         while (std::chrono::steady_clock::now() < deadline) {
             if (readChunk(candidate, probeBuffer, m_lastCommunicationAt) < 0) {
+                appendDebugLog("push-up counter probe read failed on " + port + " error=" + std::to_string(GetLastError()));
                 break;
             }
 
@@ -306,6 +381,7 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
             while ((newline = probeBuffer.find('\n')) != std::string::npos) {
                 auto line = trimLine(probeBuffer.substr(0, newline));
                 probeBuffer.erase(0, newline + 1);
+                appendDebugLog("push-up counter probe recv on " + port + ": " + line);
                 if (isFirmwareFrame(line)) {
                     matched = true;
                     break;
@@ -330,15 +406,21 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
         m_state.portName = port;
         m_state.status = "connected";
         m_state.firmwareReady = true;
+        m_state.errorMessage.clear();
         m_buffer.clear();
-        appendDebugLog("push-up counter connected on " + port);
+        appendDebugLog("push-up counter connected on " + port + " state=" + stateSummary(m_state));
         return true;
     }
 
+    if (loggedOpenFailures >= kMaxLoggedOpenFailuresPerScan) {
+        appendDebugLog("push-up counter open failures truncated after " + std::to_string(kMaxLoggedOpenFailuresPerScan) + " ports");
+    }
     m_state.connected = false;
     m_state.firmwareReady = false;
     m_state.status = "disconnected";
     m_state.portName.clear();
+    m_state.errorMessage.clear();
+    appendDebugLog("push-up counter scan end: no firmware found");
     return false;
 #else
     return false;
@@ -347,6 +429,7 @@ bool WindowsPushUpCounterAdapter::connectIfNeeded() {
 
 void WindowsPushUpCounterAdapter::disconnect() {
 #ifdef _WIN32
+    appendDebugLog("push-up counter disconnect stateBefore=" + stateSummary(m_state));
     if (m_handle != nullptr && static_cast<HANDLE>(m_handle) != invalidHandle()) {
         CloseHandle(static_cast<HANDLE>(m_handle));
     }
@@ -358,6 +441,7 @@ void WindowsPushUpCounterAdapter::disconnect() {
     m_state.working = false;
     m_state.status = "disconnected";
     m_state.portName.clear();
+    m_state.errorMessage.clear();
     m_buffer.clear();
     m_lastCommunicationAt = {};
 }
@@ -368,7 +452,7 @@ void WindowsPushUpCounterAdapter::hardResetArduino() {
         return;
     }
 
-    appendDebugLog("push-up counter hard reset via DTR");
+    appendDebugLog("push-up counter hard reset via DTR stateBefore=" + stateSummary(m_state));
     EscapeCommFunction(static_cast<HANDLE>(m_handle), CLRDTR);
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
     EscapeCommFunction(static_cast<HANDLE>(m_handle), SETDTR);
@@ -388,7 +472,7 @@ void WindowsPushUpCounterAdapter::processIncoming() {
     for (int reads = 0; reads < 64; ++reads) {
         const int bytesRead = readChunk(static_cast<HANDLE>(m_handle), m_buffer, m_lastCommunicationAt);
         if (bytesRead < 0) {
-            appendDebugLog("push-up counter read failed, disconnecting");
+            appendDebugLog("push-up counter read failed, disconnecting error=" + std::to_string(GetLastError()));
             disconnect();
             return;
         }
@@ -425,11 +509,18 @@ void WindowsPushUpCounterAdapter::parseLine(const std::string& line) {
         appendDebugLog("push-up counter recv: " + line);
         m_state.firmwareReady = true;
         m_state.status = "ready";
+        m_state.errorMessage.clear();
         return;
     }
 
     if (line.rfind("DIST ", 0) == 0) {
         m_state.distance = std::atoi(line.substr(5).c_str());
+        static int distanceLogCounter = 0;
+        ++distanceLogCounter;
+        if (distanceLogCounter == 1 || distanceLogCounter >= 20) {
+            appendDebugLog("push-up counter recv telemetry: " + line + " state=" + stateSummary(m_state));
+            distanceLogCounter = 0;
+        }
         return;
     }
 
@@ -454,6 +545,7 @@ void WindowsPushUpCounterAdapter::parseLine(const std::string& line) {
         m_state.searchingBack = true;
         m_state.working = false;
         m_state.status = "searching_back";
+        m_state.errorMessage.clear();
         return;
     }
 
@@ -462,6 +554,7 @@ void WindowsPushUpCounterAdapter::parseLine(const std::string& line) {
         m_state.searchingBack = false;
         m_state.working = true;
         m_state.status = "working";
+        m_state.errorMessage.clear();
         return;
     }
 
@@ -471,6 +564,7 @@ void WindowsPushUpCounterAdapter::parseLine(const std::string& line) {
         m_state.working = false;
         m_state.status = "complete";
         m_state.completionPending = true;
+        m_state.errorMessage.clear();
         return;
     }
 
@@ -479,6 +573,7 @@ void WindowsPushUpCounterAdapter::parseLine(const std::string& line) {
         m_state.searchingBack = false;
         m_state.working = false;
         m_state.status = "idle";
+        m_state.errorMessage.clear();
         return;
     }
 
@@ -487,8 +582,11 @@ void WindowsPushUpCounterAdapter::parseLine(const std::string& line) {
         m_state.searchingBack = false;
         m_state.working = false;
         m_state.status = "error";
+        m_state.errorMessage = line.substr(std::string("STATE ERROR ").size());
         return;
     }
+
+    appendDebugLog("push-up counter recv unrecognized: " + line);
 #endif
 }
 
@@ -499,10 +597,17 @@ void WindowsPushUpCounterAdapter::pumpIncomingFor(std::chrono::milliseconds dura
     while (std::chrono::steady_clock::now() < deadline) {
         processIncoming();
         if (m_state.completionPending) {
+            appendDebugLog("push-up counter pump stopped: completion pending state=" + stateSummary(m_state));
             break;
         }
 
         if (!testMode && (m_state.working || m_state.searchingBack || m_state.currentRep > 0)) {
+            appendDebugLog("push-up counter pump stopped: start acknowledged state=" + stateSummary(m_state));
+            break;
+        }
+
+        if (m_state.status == "error") {
+            appendDebugLog("push-up counter pump stopped: firmware error state=" + stateSummary(m_state));
             break;
         }
 
@@ -523,13 +628,17 @@ bool WindowsPushUpCounterAdapter::sendLine(const std::string& line) {
     DWORD bytesWritten = 0;
     const auto ok = WriteFile(static_cast<HANDLE>(m_handle), payload.data(), static_cast<DWORD>(payload.size()), &bytesWritten, nullptr) != 0;
     if (!ok) {
-        appendDebugLog("push-up counter write failed");
+        appendDebugLog("push-up counter write failed error=" + std::to_string(GetLastError()) + " line=" + line);
         disconnect();
         return false;
     }
 
     if (bytesWritten == payload.size()) {
         m_lastCommunicationAt = std::chrono::steady_clock::now();
+    } else {
+        appendDebugLog("push-up counter short write line=" + line
+            + " expected=" + std::to_string(payload.size())
+            + " actual=" + std::to_string(bytesWritten));
     }
     return bytesWritten == payload.size();
 #else
@@ -549,7 +658,7 @@ void WindowsPushUpCounterAdapter::checkInactivityReset() {
     }
 
     if ((std::chrono::steady_clock::now() - m_lastCommunicationAt) >= kInactivityTimeout) {
-        appendDebugLog("push-up counter inactivity timeout, resetting connection");
+        appendDebugLog("push-up counter inactivity timeout, resetting connection state=" + stateSummary(m_state));
         disconnect();
     }
 #endif

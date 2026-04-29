@@ -27,6 +27,7 @@ public:
     void setFirmwareReady(bool ready);
     void setTestMode(bool testMode);
     void setAutoStartAck(bool enabled);
+    void setStartError(const std::string& error);
     void setPortName(const std::string& port);
     void simulateRepIncrement(int rep, int set = 1);
     void simulateCompletion();
@@ -45,6 +46,7 @@ private:
     int m_totalReps{0};
     bool m_testMode{false};
     bool m_autoStartAck{true};
+    std::string m_startError;
     bool m_pumping{false};
     int m_abortCount{0};
     int m_hardResetCount{0};

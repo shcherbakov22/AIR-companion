@@ -29,6 +29,7 @@ private:
     void syncProgress();
     bool syncCompletion();
     void failActiveSession(const std::string& notes);
+    void logStateSnapshot(const char* reason);
 
     const networking::CompanionApiClient& m_apiClient;
     std::string m_deviceToken;
@@ -39,11 +40,14 @@ private:
     std::optional<models::PushUpStationSession> m_session;
     std::string m_launchedSessionId;
     int m_lastProgressRep{0};
+    int m_launchFailureCount{0};
     int m_pendingCount{0};
     bool m_startSynced{false};
     std::chrono::steady_clock::time_point m_lastHeartbeatAt{};
     std::chrono::steady_clock::time_point m_lastStartSyncAttemptAt{};
     std::chrono::steady_clock::time_point m_lastMeaningfulActivityAt{};
+    std::chrono::steady_clock::time_point m_lastStateLogAt{};
+    std::string m_lastStateLogSignature;
     std::string m_status{"push-up idle"};
 };
 

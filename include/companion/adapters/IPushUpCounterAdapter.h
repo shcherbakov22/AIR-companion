@@ -16,6 +16,7 @@ struct PushUpCounterState {
     bool searchingBack{false};
     bool working{false};
     bool completionPending{false};
+    std::string errorMessage;
 };
 
 class IPushUpCounterAdapter {

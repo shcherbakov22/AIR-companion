@@ -49,8 +49,12 @@ bool FakePushUpCounterAdapter::startSession(
     m_state.searchingBack = false;
     m_state.working = false;
     m_state.status = "ready";
+    m_state.errorMessage.clear();
 
-    if (m_testMode) {
+    if (!m_startError.empty()) {
+        m_state.status = "error";
+        m_state.errorMessage = m_startError;
+    } else if (m_testMode) {
         enqueueTestResponse(sessionId, totalReps);
         return true;
     } else if (m_autoStartAck) {
@@ -78,6 +82,7 @@ bool FakePushUpCounterAdapter::abortSession(const std::string& /*sessionId*/) {
     m_state.searchingBack = false;
     m_state.working = false;
     m_state.status = "idle";
+    m_state.errorMessage.clear();
     m_responseQueue = {};
     return true;
 }
@@ -91,6 +96,7 @@ void FakePushUpCounterAdapter::hardReset() {
     m_state.searchingBack = false;
     m_state.working = false;
     m_state.status = "disconnected";
+    m_state.errorMessage.clear();
 }
 
 bool FakePushUpCounterAdapter::consumeCompletion() {
@@ -110,6 +116,7 @@ void FakePushUpCounterAdapter::processLine(const std::string& rawLine) {
     if (line.rfind("HELLO", 0) == 0 || line == "PONG") {
         m_state.firmwareReady = true;
         m_state.status = "ready";
+        m_state.errorMessage.clear();
         return;
     }
 
@@ -137,6 +144,7 @@ void FakePushUpCounterAdapter::processLine(const std::string& rawLine) {
         m_state.searchingBack = true;
         m_state.working = false;
         m_state.status = "searching_back";
+        m_state.errorMessage.clear();
         return;
     }
 
@@ -144,6 +152,7 @@ void FakePushUpCounterAdapter::processLine(const std::string& rawLine) {
         m_state.searchingBack = false;
         m_state.working = true;
         m_state.status = "working";
+        m_state.errorMessage.clear();
         return;
     }
 
@@ -152,6 +161,7 @@ void FakePushUpCounterAdapter::processLine(const std::string& rawLine) {
         m_state.working = false;
         m_state.status = "complete";
         m_state.completionPending = true;
+        m_state.errorMessage.clear();
         return;
     }
 
@@ -159,6 +169,7 @@ void FakePushUpCounterAdapter::processLine(const std::string& rawLine) {
         m_state.searchingBack = false;
         m_state.working = false;
         m_state.status = "idle";
+        m_state.errorMessage.clear();
         return;
     }
 
@@ -166,6 +177,7 @@ void FakePushUpCounterAdapter::processLine(const std::string& rawLine) {
         m_state.searchingBack = false;
         m_state.working = false;
         m_state.status = "error";
+        m_state.errorMessage = line.substr(std::string("STATE ERROR ").size());
         return;
     }
 }
@@ -231,6 +243,7 @@ void FakePushUpCounterAdapter::setConnected(bool connected) {
         m_state.currentRep = 0;
         m_state.currentSet = 1;
         m_state.completionPending = false;
+        m_state.errorMessage.clear();
         m_currentSessionId.clear();
         m_responseQueue = {};
     }
@@ -251,6 +264,10 @@ void FakePushUpCounterAdapter::setAutoStartAck(bool enabled) {
     m_autoStartAck = enabled;
 }
 
+void FakePushUpCounterAdapter::setStartError(const std::string& error) {
+    m_startError = error;
+}
+
 void FakePushUpCounterAdapter::setPortName(const std::string& port) {
     m_state.portName = port;
 }
@@ -262,6 +279,7 @@ void FakePushUpCounterAdapter::simulateRepIncrement(int rep, int set) {
         m_state.searchingBack = false;
         m_state.working = true;
         m_state.status = "working";
+        m_state.errorMessage.clear();
     }
     if (rep >= m_totalReps && m_totalReps > 0) {
         simulateCompletion();
@@ -273,6 +291,7 @@ void FakePushUpCounterAdapter::simulateCompletion() {
     m_state.working = false;
     m_state.status = "complete";
     m_state.completionPending = true;
+    m_state.errorMessage.clear();
 }
 
 void FakePushUpCounterAdapter::simulateDisconnection() {

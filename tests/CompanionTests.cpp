@@ -1303,6 +1303,91 @@ void testPushUpCoordinatorAbortsHardwareWhenTimingOutSession() {
     requireEqual(adapter.hardResetCount(), 1, "coordinator should hard reset local hardware when timing out");
 }
 
+void testPushUpCoordinatorFailsSessionOnFirmwareStartError() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev-start-error";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-start-error";
+    session.requiredPushUps = 10;
+    session.dropThreshold = 5;
+    session.upGap = 100;
+    session.downTolerance = 200;
+    session.status = "claimed";
+
+    api.setClaimNextResponse(session);
+    api.setFailResponse(true);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+    adapter.setStartError("NO_SENSOR");
+
+    coordinator.tick();
+    coordinator.tick();
+
+    bool foundFail = false;
+    for (const auto& call : api.calls()) {
+        if (call.kind == PushUpStationApiCall::Kind::Fail) {
+            foundFail = true;
+            requireEqual(call.sessionId, std::string("session-start-error"), "fail session id should match");
+            require(call.failNotes.find("NO_SENSOR") != std::string::npos, "fail notes should include firmware error");
+            break;
+        }
+    }
+    require(foundFail, "coordinator should fail the server session when firmware rejects START");
+}
+
+void testPushUpCoordinatorFailsSessionAfterRepeatedStartNoAck() {
+    using namespace companion;
+    using namespace companion::core;
+    using namespace companion::test;
+
+    FakeCompanionApiClient api;
+    FakePushUpCounterAdapter adapter;
+    models::DeviceIdentity identity;
+    identity.deviceId = "dev-no-ack";
+    identity.deviceLabel = "test-device";
+
+    PushUpStationCoordinator coordinator(api, "token", identity, adapter);
+
+    models::PushUpStationSession session;
+    session.id = "session-no-ack";
+    session.requiredPushUps = 10;
+    session.dropThreshold = 5;
+    session.upGap = 100;
+    session.downTolerance = 200;
+    session.status = "claimed";
+
+    api.setClaimNextResponse(session);
+    api.setFailResponse(true);
+    adapter.setConnected(true);
+    adapter.setFirmwareReady(true);
+    adapter.setAutoStartAck(false);
+
+    coordinator.tick();
+    coordinator.tick();
+    coordinator.tick();
+    coordinator.tick();
+
+    int failCalls = 0;
+    for (const auto& call : api.calls()) {
+        if (call.kind == PushUpStationApiCall::Kind::Fail) {
+            ++failCalls;
+            requireEqual(call.sessionId, std::string("session-no-ack"), "fail session id should match");
+            require(call.failNotes.find("did not acknowledge") != std::string::npos, "fail notes should explain missing START ack");
+        }
+    }
+    requireEqual(failCalls, 1, "coordinator should fail once after repeated missing START acknowledgements");
+}
+
 void testPushUpCoordinatorClearsStaleSessionWhenHeartbeatStopsReturningIt() {
     using namespace companion;
     using namespace companion::core;
@@ -1475,6 +1560,10 @@ void testPushUpAdapterProtocolLineParsing() {
     adapter.processLine("STATE IDLE");
     // Note: completionPending is NOT cleared by STATE IDLE - only consumeCompletion clears it
     requireEqual(adapter.state().status, std::string("idle"), "status should be idle");
+
+    adapter.processLine("STATE ERROR NO_SENSOR");
+    requireEqual(adapter.state().status, std::string("error"), "status should be error");
+    requireEqual(adapter.state().errorMessage, std::string("NO_SENSOR"), "errorMessage should preserve firmware error code");
 }
 
 }  // namespace
@@ -1565,6 +1654,8 @@ int main() {
         {"pushUpCoordinatorRetriesStartSyncAfterApiFailure", testPushUpCoordinatorRetriesStartSyncAfterApiFailure},
         {"pushUpCoordinatorFailsSessionOnDisconnect",   testPushUpCoordinatorFailsSessionOnDisconnect},
         {"pushUpCoordinatorAbortsHardwareWhenTimingOutSession", testPushUpCoordinatorAbortsHardwareWhenTimingOutSession},
+        {"pushUpCoordinatorFailsSessionOnFirmwareStartError", testPushUpCoordinatorFailsSessionOnFirmwareStartError},
+        {"pushUpCoordinatorFailsSessionAfterRepeatedStartNoAck", testPushUpCoordinatorFailsSessionAfterRepeatedStartNoAck},
         {"pushUpCoordinatorClearsStaleSessionWhenHeartbeatStopsReturningIt", testPushUpCoordinatorClearsStaleSessionWhenHeartbeatStopsReturningIt},
         {"pushUpAdapterStateTransitions",              testPushUpAdapterStateTransitions},
         {"pushUpAdapterRequiresStartAcknowledgement",  testPushUpAdapterRequiresStartAcknowledgement},
