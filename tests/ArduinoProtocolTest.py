@@ -27,8 +27,8 @@ def open_serial():
     attrs[2] &= ~(termios.PARENB | termios.CSTOPB | termios.CSIZE)
     attrs[2] |= termios.CLOCAL | termios.CREAD | termios.CS8
     attrs[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)
-    attrs[4] = termios.B115200
-    attrs[5] = termios.B115200
+    attrs[4] = termios.B9600
+    attrs[5] = termios.B9600
     attrs[6][termios.VMIN] = 0
     attrs[6][termios.VTIME] = 2
     termios.tcsetattr(fd, termios.TCSANOW, attrs)
