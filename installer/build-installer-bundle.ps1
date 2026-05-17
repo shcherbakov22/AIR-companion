@@ -1,13 +1,22 @@
 param(
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$Version = '0.1.22'
 )
 
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$presetDirectory = if ($Configuration -eq 'Release') { 'windows-release' } else { 'windows-debug' }
-$sourceDirectory = Join-Path $repoRoot "build\\$presetDirectory\\$Configuration"
-$bundleDirectory = Join-Path $repoRoot "dist\\air-companion-windows-installer-0.1.18"
+$sourceDirectoryCandidates = @(
+    (Join-Path $repoRoot 'build\mingw-w64-release'),
+    (Join-Path $repoRoot "build\windows-release\$Configuration"),
+    (Join-Path $repoRoot "build\windows-debug\$Configuration")
+)
+$sourceDirectory = $sourceDirectoryCandidates | Where-Object { Test-Path (Join-Path $_ 'air_companion_service.exe') } | Select-Object -First 1
+if (-not $sourceDirectory) {
+    throw "Could not find built companion binaries. Tried: $($sourceDirectoryCandidates -join ', ')"
+}
+
+$bundleDirectory = Join-Path $repoRoot "dist\\air-companion-windows-installer-$Version"
 $bundleZip = "$bundleDirectory.zip"
 
 foreach ($requiredFile in @('air_companion_service.exe', 'air_companion_tray.exe', 'air_companion_helper.exe', 'air_companion_updater.exe')) {

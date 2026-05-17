@@ -507,6 +507,8 @@ void testTaskXmlHasBootTriggerAndEventTrigger() {
             "no execution time limit");
     require(xml.find("<RunLevel>HighestAvailable</RunLevel>") != std::string::npos,
             "runs as highest available");
+    require(xml.find("<Hidden>true</Hidden>") != std::string::npos,
+            "task is hidden");
     require(xml.find("<RestartOnFailure>") != std::string::npos,
             "has restart on failure");
 }
@@ -913,6 +915,7 @@ void testBootAutoStartRegistrarResolvesServiceBinaryPath() {
     require(taskXml.find("Power-Troubleshooter") != std::string::npos, "task xml should include resume event trigger");
     require(taskXml.find("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>") != std::string::npos, "task xml should not stop on battery");
     require(taskXml.find("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>") != std::string::npos, "task xml should remove execution time limit");
+    require(taskXml.find("<Hidden>true</Hidden>") != std::string::npos, "task xml should create a hidden task");
 }
 
 void testUpdateCoordinatorVersionComparison() {

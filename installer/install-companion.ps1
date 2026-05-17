@@ -107,6 +107,10 @@ function Ensure-ServiceWatchdogTasks {
         @{
             Name = 'AIR Companion Service (Logon)'
             Schedule = '/SC ONLOGON'
+        },
+        @{
+            Name = 'AIR Companion Service (Watchdog)'
+            Schedule = '/SC MINUTE /MO 1'
         }
     )
 
@@ -118,6 +122,41 @@ function Ensure-ServiceWatchdogTasks {
             throw "Failed to create watchdog task '$($task.Name)'."
         }
     }
+}
+
+function Protect-CompanionPath {
+    param(
+        [string]$Path,
+        [switch]$AllowUsersReadExecute
+    )
+
+    if (-not (Test-Path $Path)) {
+        New-Item -ItemType Directory -Force -Path $Path | Out-Null
+    }
+
+    $grants = @(
+        '*S-1-5-18:(OI)(CI)F',      # LocalSystem
+        '*S-1-5-32-544:(OI)(CI)F'   # Administrators
+    )
+
+    if ($AllowUsersReadExecute) {
+        $grants += '*S-1-5-32-545:(OI)(CI)RX' # Users
+    }
+
+    & icacls.exe $Path /inheritance:r /grant:r $grants /T /C | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to protect ACLs for $Path."
+    }
+}
+
+function Protect-CompanionStorage {
+    param(
+        [string]$InstallDirectory
+    )
+
+    Protect-CompanionPath -Path $InstallDirectory -AllowUsersReadExecute
+    Protect-CompanionPath -Path (Join-Path $env:ProgramData 'AIRCompanion\Service')
+    Protect-CompanionPath -Path (Join-Path $env:ProgramData 'AIRCompanion\Internal')
 }
 
 function Ensure-RemoteControlFirewallRule {
@@ -236,6 +275,7 @@ try {
     sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/30000 | Out-Null
     reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\$serviceName" /v DelayedAutostart /t REG_DWORD /d 1 /f | Out-Null
     Ensure-ServiceWatchdogTasks -ServiceName $serviceName
+    Protect-CompanionStorage -InstallDirectory $InstallDirectory
     Ensure-RemoteControlFirewallRule
 
     Start-Service -Name $serviceName -ErrorAction SilentlyContinue | Out-Null

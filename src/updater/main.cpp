@@ -159,6 +159,42 @@ bool startService(const std::wstring& serviceName) {
     return true;
 }
 
+bool configureServiceRecovery(const std::wstring& serviceName) {
+    const auto manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (manager == nullptr) {
+        return false;
+    }
+
+    const auto service = OpenServiceW(manager, serviceName.c_str(), SERVICE_CHANGE_CONFIG);
+    if (service == nullptr) {
+        CloseServiceHandle(manager);
+        return false;
+    }
+
+    SC_ACTION actions[3]{};
+    actions[0].Type = SC_ACTION_RESTART;
+    actions[0].Delay = 5000;
+    actions[1].Type = SC_ACTION_RESTART;
+    actions[1].Delay = 15000;
+    actions[2].Type = SC_ACTION_RESTART;
+    actions[2].Delay = 30000;
+
+    SERVICE_FAILURE_ACTIONSW failureActions{};
+    failureActions.dwResetPeriod = 86400;
+    failureActions.cActions = 3;
+    failureActions.lpsaActions = actions;
+
+    SERVICE_DELAYED_AUTO_START_INFO delayedAutoStart{};
+    delayedAutoStart.fDelayedAutostart = TRUE;
+
+    const bool ok = ChangeServiceConfig2W(service, SERVICE_CONFIG_FAILURE_ACTIONS, &failureActions) != FALSE
+        && ChangeServiceConfig2W(service, SERVICE_CONFIG_DELAYED_AUTO_START_INFO, &delayedAutoStart) != FALSE;
+
+    CloseServiceHandle(service);
+    CloseServiceHandle(manager);
+    return ok;
+}
+
 bool runHiddenAndWait(std::wstring commandLine, DWORD timeoutMs) {
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
@@ -196,6 +232,75 @@ bool runHiddenAndWait(std::wstring commandLine, DWORD timeoutMs) {
 void stopCompanionUserProcesses() {
     runHiddenAndWait(L"taskkill.exe /IM air_companion_tray.exe /F /T", 10000);
     runHiddenAndWait(L"taskkill.exe /IM air_companion_helper.exe /F /T", 10000);
+}
+
+bool ensureWatchdogTask(const std::wstring& taskName,
+                        const std::wstring& schedule,
+                        const std::wstring& serviceName) {
+    std::wstring commandLine = L"schtasks.exe /Create /TN \""
+        + taskName
+        + L"\" "
+        + schedule
+        + L" /RU SYSTEM /RL HIGHEST /TR \"cmd.exe /c sc start "
+        + serviceName
+        + L"\" /F";
+
+    return runHiddenAndWait(std::move(commandLine), 30000);
+}
+
+bool ensureWatchdogTasks(const std::wstring& serviceName) {
+    const bool boot = ensureWatchdogTask(
+        L"AIR Companion Service (Boot)",
+        L"/SC ONSTART",
+        serviceName
+    );
+    const bool logon = ensureWatchdogTask(
+        L"AIR Companion Service (Logon)",
+        L"/SC ONLOGON",
+        serviceName
+    );
+    const bool watchdog = ensureWatchdogTask(
+        L"AIR Companion Service (Watchdog)",
+        L"/SC MINUTE /MO 1",
+        serviceName
+    );
+
+    return boot && logon && watchdog;
+}
+
+bool protectPath(const std::filesystem::path& path, bool allowUsersReadExecute) {
+    std::error_code errorCode;
+    std::filesystem::create_directories(path, errorCode);
+    if (errorCode) {
+        return false;
+    }
+
+    std::wstring commandLine = L"icacls.exe \""
+        + path.wstring()
+        + L"\" /inheritance:r /grant:r \"*S-1-5-18:(OI)(CI)F\" \"*S-1-5-32-544:(OI)(CI)F\"";
+
+    if (allowUsersReadExecute) {
+        commandLine += L" \"*S-1-5-32-545:(OI)(CI)RX\"";
+    }
+
+    commandLine += L" /T /C";
+
+    return runHiddenAndWait(std::move(commandLine), 120000);
+}
+
+bool protectCompanionStorage(const std::filesystem::path& targetDirectory) {
+    const auto programData = [] {
+        const auto* value = std::getenv("PROGRAMDATA");
+        return value != nullptr && *value != '\0'
+            ? std::filesystem::path(value)
+            : std::filesystem::path("C:\\ProgramData");
+    }();
+
+    const bool installDirectoryOk = protectPath(targetDirectory, true);
+    const bool serviceConfigOk = protectPath(programData / "AIRCompanion" / "Service", false);
+    const bool internalConfigOk = protectPath(programData / "AIRCompanion" / "Internal", false);
+
+    return installDirectoryOk && serviceConfigOk && internalConfigOk;
 }
 
 bool extractArchive(const std::filesystem::path& archivePath, const std::filesystem::path& destinationPath) {
@@ -306,6 +411,13 @@ int main(int argc, char** argv) {
     }
 
     if (!copyExtractedFiles(sourceRoot, options->targetDirectory)) {
+        startService(serviceName);
+        return 1;
+    }
+
+    if (!configureServiceRecovery(serviceName)
+        || !ensureWatchdogTasks(serviceName)
+        || !protectCompanionStorage(options->targetDirectory)) {
         startService(serviceName);
         return 1;
     }

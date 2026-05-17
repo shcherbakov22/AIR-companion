@@ -187,7 +187,7 @@ std::string BootAutoStartRegistrar::taskXmlForServiceBinary(const std::string& s
         "    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>\n"
         "    <AllowStartOnDemand>true</AllowStartOnDemand>\n"
         "    <Enabled>true</Enabled>\n"
-        "    <Hidden>false</Hidden>\n"
+        "    <Hidden>true</Hidden>\n"
         "    <RunOnlyIfIdle>false</RunOnlyIfIdle>\n"
         "    <WakeToRun>false</WakeToRun>\n"
         "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n"
