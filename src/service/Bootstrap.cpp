@@ -64,7 +64,18 @@ Bootstrap::Bootstrap(CompanionConfigStore configStore) : m_configStore(std::move
 std::optional<BootstrapResult> Bootstrap::initialize() const {
     if (const auto stored = m_configStore.load(); stored.has_value()) {
         auto config = *stored;
+        bool shouldSaveConfig = false;
+
         if (rewriteExternalPlatformUrl(config)) {
+            shouldSaveConfig = true;
+        }
+
+        if (config.identity.appVersion != AIR_COMPANION_VERSION) {
+            config.identity.appVersion = AIR_COMPANION_VERSION;
+            shouldSaveConfig = true;
+        }
+
+        if (shouldSaveConfig) {
             (void) m_configStore.save(config);
         }
 
