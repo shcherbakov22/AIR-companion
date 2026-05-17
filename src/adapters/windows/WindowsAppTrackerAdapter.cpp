@@ -204,6 +204,17 @@ std::wstring helperBinaryPath() {
     return path;
 }
 
+std::filesystem::path sharedInteractiveRuntimeDirectory() {
+    wchar_t* publicDirectory = nullptr;
+    std::wstring base = L"C:\\Users\\Public";
+    if (size_t length = 0; _wdupenv_s(&publicDirectory, &length, L"PUBLIC") == 0 && publicDirectory != nullptr) {
+        base.assign(publicDirectory);
+        free(publicDirectory);
+    }
+
+    return std::filesystem::path(base) / "AIRCompanion" / "InteractiveCapture";
+}
+
 bool sameSessionAsActiveConsole() {
     DWORD processSessionId = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &processSessionId)) {
@@ -526,14 +537,7 @@ std::optional<models::ActivitySnapshot> WindowsAppTrackerAdapter::captureViaActi
         return std::nullopt;
     }
 
-    wchar_t* programData = nullptr;
-    std::wstring base = L"C:\\ProgramData";
-    if (size_t length = 0; _wdupenv_s(&programData, &length, L"PROGRAMDATA") == 0 && programData != nullptr) {
-        base.assign(programData);
-        free(programData);
-    }
-
-    auto outputPath = std::filesystem::path(base) / "AIRCompanion" / "Internal" / "app-snapshot.json";
+    auto outputPath = sharedInteractiveRuntimeDirectory() / "app-snapshot.json";
     std::error_code errorCode;
     std::filesystem::create_directories(outputPath.parent_path(), errorCode);
     std::filesystem::remove(outputPath, errorCode);

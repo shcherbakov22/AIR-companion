@@ -268,7 +268,13 @@ bool ensureWatchdogTasks(const std::wstring& serviceName) {
     return boot && logon && watchdog;
 }
 
-bool protectPath(const std::filesystem::path& path, bool allowUsersReadExecute) {
+enum class UsersAccess {
+    None,
+    ReadExecute,
+    Modify,
+};
+
+bool protectPath(const std::filesystem::path& path, UsersAccess usersAccess) {
     std::error_code errorCode;
     std::filesystem::create_directories(path, errorCode);
     if (errorCode) {
@@ -279,8 +285,10 @@ bool protectPath(const std::filesystem::path& path, bool allowUsersReadExecute) 
         + path.wstring()
         + L"\" /inheritance:r /grant:r \"*S-1-5-18:(OI)(CI)F\" \"*S-1-5-32-544:(OI)(CI)F\"";
 
-    if (allowUsersReadExecute) {
+    if (usersAccess == UsersAccess::ReadExecute) {
         commandLine += L" \"*S-1-5-32-545:(OI)(CI)RX\"";
+    } else if (usersAccess == UsersAccess::Modify) {
+        commandLine += L" \"*S-1-5-32-545:(OI)(CI)M\"";
     }
 
     commandLine += L" /T /C";
@@ -295,12 +303,22 @@ bool protectCompanionStorage(const std::filesystem::path& targetDirectory) {
             ? std::filesystem::path(value)
             : std::filesystem::path("C:\\ProgramData");
     }();
+    const auto publicDirectory = [] {
+        const auto* value = std::getenv("PUBLIC");
+        return value != nullptr && *value != '\0'
+            ? std::filesystem::path(value)
+            : std::filesystem::path("C:\\Users\\Public");
+    }();
 
-    const bool installDirectoryOk = protectPath(targetDirectory, true);
-    const bool serviceConfigOk = protectPath(programData / "AIRCompanion" / "Service", false);
-    const bool internalConfigOk = protectPath(programData / "AIRCompanion" / "Internal", false);
+    const bool installDirectoryOk = protectPath(targetDirectory, UsersAccess::ReadExecute);
+    const bool serviceConfigOk = protectPath(programData / "AIRCompanion" / "Service", UsersAccess::None);
+    const bool internalConfigOk = protectPath(programData / "AIRCompanion" / "Internal", UsersAccess::None);
+    const bool interactiveRuntimeOk = protectPath(
+        publicDirectory / "AIRCompanion" / "InteractiveCapture",
+        UsersAccess::Modify
+    );
 
-    return installDirectoryOk && serviceConfigOk && internalConfigOk;
+    return installDirectoryOk && serviceConfigOk && internalConfigOk && interactiveRuntimeOk;
 }
 
 bool extractArchive(const std::filesystem::path& archivePath, const std::filesystem::path& destinationPath) {

@@ -127,7 +127,8 @@ function Ensure-ServiceWatchdogTasks {
 function Protect-CompanionPath {
     param(
         [string]$Path,
-        [switch]$AllowUsersReadExecute
+        [ValidateSet('None', 'ReadExecute', 'Modify')]
+        [string]$UsersAccess = 'None'
     )
 
     if (-not (Test-Path $Path)) {
@@ -139,8 +140,10 @@ function Protect-CompanionPath {
         '*S-1-5-32-544:(OI)(CI)F'   # Administrators
     )
 
-    if ($AllowUsersReadExecute) {
+    if ($UsersAccess -eq 'ReadExecute') {
         $grants += '*S-1-5-32-545:(OI)(CI)RX' # Users
+    } elseif ($UsersAccess -eq 'Modify') {
+        $grants += '*S-1-5-32-545:(OI)(CI)M' # Users
     }
 
     & icacls.exe $Path /inheritance:r /grant:r $grants /T /C | Out-Null
@@ -154,9 +157,10 @@ function Protect-CompanionStorage {
         [string]$InstallDirectory
     )
 
-    Protect-CompanionPath -Path $InstallDirectory -AllowUsersReadExecute
+    Protect-CompanionPath -Path $InstallDirectory -UsersAccess ReadExecute
     Protect-CompanionPath -Path (Join-Path $env:ProgramData 'AIRCompanion\Service')
     Protect-CompanionPath -Path (Join-Path $env:ProgramData 'AIRCompanion\Internal')
+    Protect-CompanionPath -Path (Join-Path $env:PUBLIC 'AIRCompanion\InteractiveCapture') -UsersAccess Modify
 }
 
 function Ensure-RemoteControlFirewallRule {

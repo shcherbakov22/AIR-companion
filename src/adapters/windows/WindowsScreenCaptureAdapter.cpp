@@ -394,11 +394,11 @@ std::wstring helperBinaryPath() {
 }
 
 std::filesystem::path sharedInteractiveCaptureDirectory() {
-    if (const auto* programData = std::getenv("PROGRAMDATA"); programData != nullptr && *programData != '\0') {
-        return std::filesystem::path(programData) / "AIRCompanion" / "Internal";
+    if (const auto* publicDirectory = std::getenv("PUBLIC"); publicDirectory != nullptr && *publicDirectory != '\0') {
+        return std::filesystem::path(publicDirectory) / "AIRCompanion" / "InteractiveCapture";
     }
 
-    return std::filesystem::path("C:\\ProgramData\\AIRCompanion\\Internal");
+    return std::filesystem::path("C:\\Users\\Public\\AIRCompanion\\InteractiveCapture");
 }
 
 bool sameSessionAsActiveConsole() {
