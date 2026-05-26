@@ -11,31 +11,15 @@
 #include "companion/service/EnrollmentRequestStore.h"
 #include "companion/service/ServiceHost.h"
 #include "companion/service/UpdateCoordinator.h"
+#include "companion/support/LocalLog.h"
 
 #include <chrono>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 
 namespace {
 
 void appendBootstrapLog(const std::string& line) {
-    const char* appData = std::getenv("APPDATA");
-    if (appData == nullptr || *appData == '\0') {
-        return;
-    }
-
-    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
-    std::error_code errorCode;
-    std::filesystem::create_directories(logDirectory, errorCode);
-
-    std::ofstream output(logDirectory / "debug.log", std::ios::app);
-    if (!output.is_open()) {
-        return;
-    }
-
-    output << line << '\n';
+    companion::support::appendDebugLog(line);
 }
 
 }
@@ -50,7 +34,8 @@ int main() {
                 const auto requestPath = enrollmentRequestStore.requestPath();
                 (void) enrollmentRequestStore.saveTemplate();
                 host.setLastStatus("bootstrap failed; retrying");
-                appendBootstrapLog("bootstrap failed; waiting for enrollment request at " + requestPath);
+                appendBootstrapLog("bootstrap failed; waiting for enrollment request at " + requestPath
+                    + " log_dir=" + companion::support::localLogDirectory());
                 std::cerr << "AIR Companion service bootstrap failed. Write enrollment details to " << requestPath
                           << " using air_companion_tray --write-enrollment --base-url <url> --enrollment-token <token>"
                           << " [--device-label <label>] [--root-ca-url <url>] or the legacy --username/--password flow." << '\n';
@@ -103,6 +88,8 @@ int main() {
                 cameraCaptureAdapter
             );
 
+            appendBootstrapLog("bootstrap ok: " + bootstrapped->status
+                + " log_dir=" + companion::support::localLogDirectory());
             std::cout << bootstrapped->status << '\n';
             host.setLastStatus(bootstrapped->status);
             agent.start();

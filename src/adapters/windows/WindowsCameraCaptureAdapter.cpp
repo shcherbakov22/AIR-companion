@@ -1,9 +1,8 @@
 #include "companion/adapters/windows/WindowsAdapters.h"
+#include "companion/support/LocalLog.h"
 
 #ifdef _WIN32
-#include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -36,21 +35,7 @@ constexpr ULONG kJpegQuality = 88;
 
 
 void appendDebugLog(const std::string& line) {
-    const char* appData = std::getenv("APPDATA");
-    if (appData == nullptr || *appData == '\0') {
-        return;
-    }
-
-    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
-    std::error_code errorCode;
-    std::filesystem::create_directories(logDirectory, errorCode);
-
-    std::ofstream output(logDirectory / "debug.log", std::ios::app);
-    if (!output.is_open()) {
-        return;
-    }
-
-    output << line << '\n';
+    companion::support::appendDebugLog(line);
 }
 
 class ScopedCoInitialize {
@@ -219,6 +204,160 @@ bool readFrameSize(IMFMediaType* mediaType, UINT32& width, UINT32& height) {
     return SUCCEEDED(MFGetAttributeSize(mediaType, MF_MT_FRAME_SIZE, &width, &height));
 }
 
+std::optional<std::string> cameraFriendlyName(IMFActivate* device) {
+    WCHAR* name = nullptr;
+    UINT32 length = 0;
+    if (FAILED(device->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &length)) || name == nullptr) {
+        return std::nullopt;
+    }
+
+    const auto required = WideCharToMultiByte(CP_UTF8, 0, name, static_cast<int>(length), nullptr, 0, nullptr, nullptr);
+    std::string result;
+    if (required > 0) {
+        result.resize(static_cast<std::size_t>(required));
+        WideCharToMultiByte(CP_UTF8, 0, name, static_cast<int>(length), result.data(), required, nullptr, nullptr);
+    }
+
+    CoTaskMemFree(name);
+    return result.empty() ? std::nullopt : std::optional<std::string>{result};
+}
+
+std::optional<std::string> captureFromDevice(IMFActivate* device, UINT32 deviceIndex, const std::string& outputDirectory) {
+    const auto friendlyName = cameraFriendlyName(device).value_or("unknown");
+    appendDebugLog("camera: trying device index=" + std::to_string(deviceIndex) + " name=" + friendlyName);
+
+    ComPtr<IMFMediaSource> mediaSource;
+    if (FAILED(device->ActivateObject(IID_PPV_ARGS(&mediaSource))) || mediaSource == nullptr) {
+        appendDebugLog("camera: ActivateObject failed index=" + std::to_string(deviceIndex));
+        return std::nullopt;
+    }
+
+    auto shutdownSource = [&]() {
+        if (mediaSource) {
+            mediaSource->Shutdown();
+        }
+    };
+
+    ComPtr<IMFAttributes> sourceReaderAttributes;
+    if (FAILED(MFCreateAttributes(&sourceReaderAttributes, 2))) {
+        appendDebugLog("camera: MFCreateAttributes for source reader failed");
+        shutdownSource();
+        return std::nullopt;
+    }
+
+    if (FAILED(sourceReaderAttributes->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE))) {
+        appendDebugLog("camera: enabling video processing failed");
+        shutdownSource();
+        return std::nullopt;
+    }
+
+    ComPtr<IMFSourceReader> sourceReader;
+    if (FAILED(MFCreateSourceReaderFromMediaSource(mediaSource.Get(), sourceReaderAttributes.Get(), &sourceReader))) {
+        appendDebugLog("camera: MFCreateSourceReaderFromMediaSource failed index=" + std::to_string(deviceIndex));
+        shutdownSource();
+        return std::nullopt;
+    }
+
+    ComPtr<IMFMediaType> targetMediaType;
+    if (FAILED(MFCreateMediaType(&targetMediaType))) {
+        appendDebugLog("camera: MFCreateMediaType failed");
+        shutdownSource();
+        return std::nullopt;
+    }
+
+    if (FAILED(targetMediaType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)) ||
+        FAILED(targetMediaType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32)) ||
+        FAILED(sourceReader->SetCurrentMediaType(
+            static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
+            nullptr,
+            targetMediaType.Get()))) {
+        appendDebugLog("camera: SetCurrentMediaType RGB32 failed index=" + std::to_string(deviceIndex));
+        shutdownSource();
+        return std::nullopt;
+    }
+
+    ComPtr<IMFMediaType> currentMediaType;
+    if (FAILED(sourceReader->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), &currentMediaType))) {
+        appendDebugLog("camera: GetCurrentMediaType failed");
+        shutdownSource();
+        return std::nullopt;
+    }
+
+    UINT32 width = 0;
+    UINT32 height = 0;
+    if (!readFrameSize(currentMediaType.Get(), width, height) || width == 0 || height == 0) {
+        appendDebugLog("camera: invalid frame size");
+        shutdownSource();
+        return std::nullopt;
+    }
+    appendDebugLog("camera: frame size=" + std::to_string(width) + "x" + std::to_string(height));
+
+    appendDebugLog("camera: warming up for " + std::to_string(kCameraWarmupMilliseconds) + "ms");
+    Sleep(kCameraWarmupMilliseconds);
+
+    int capturedFrames = 0;
+    for (int attempt = 0; attempt < kMaxFrameAttempts; ++attempt) {
+        DWORD streamIndex = 0;
+        DWORD streamFlags = 0;
+        LONGLONG timestamp = 0;
+        ComPtr<IMFSample> sample;
+
+        const auto readResult = sourceReader->ReadSample(
+            static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
+            0,
+            &streamIndex,
+            &streamFlags,
+            &timestamp,
+            &sample);
+
+        if (FAILED(readResult)) {
+            appendDebugLog("camera: ReadSample failed index=" + std::to_string(deviceIndex));
+            shutdownSource();
+            return std::nullopt;
+        }
+
+        if ((streamFlags & MF_SOURCE_READERF_STREAMTICK) != 0 || sample == nullptr) {
+            appendDebugLog("camera: stream tick or null sample attempt=" + std::to_string(attempt));
+            Sleep(50);
+            continue;
+        }
+
+        ++capturedFrames;
+        if (capturedFrames <= kDiscardedWarmupFrames) {
+            appendDebugLog("camera: discarding warmup frame=" + std::to_string(capturedFrames));
+            Sleep(50);
+            continue;
+        }
+
+        ComPtr<IMFMediaBuffer> mediaBuffer;
+        if (FAILED(sample->ConvertToContiguousBuffer(&mediaBuffer)) || mediaBuffer == nullptr) {
+            appendDebugLog("camera: ConvertToContiguousBuffer failed");
+            shutdownSource();
+            return std::nullopt;
+        }
+
+        BYTE* data = nullptr;
+        DWORD maxLength = 0;
+        DWORD currentLength = 0;
+        if (FAILED(mediaBuffer->Lock(&data, &maxLength, &currentLength)) || data == nullptr || currentLength == 0) {
+            appendDebugLog("camera: mediaBuffer lock failed");
+            shutdownSource();
+            return std::nullopt;
+        }
+
+        const LONG stride = static_cast<LONG>(width * 4);
+        const auto savedPath = saveFrameAsJpeg(outputDirectory, data, width, height, stride);
+        mediaBuffer->Unlock();
+        appendDebugLog("camera: save result=" + std::string(savedPath.has_value() ? *savedPath : "null"));
+        shutdownSource();
+        return savedPath;
+    }
+
+    appendDebugLog("camera: no sample received after retries index=" + std::to_string(deviceIndex));
+    shutdownSource();
+    return std::nullopt;
+}
+
 }  // namespace
 #endif
 
@@ -269,120 +408,19 @@ std::optional<std::string> WindowsCameraCaptureAdapter::captureToFile(const std:
         CoTaskMemFree(devices);
     };
 
-    ComPtr<IMFMediaSource> mediaSource;
-    const HRESULT activateResult = devices[0]->ActivateObject(IID_PPV_ARGS(&mediaSource));
+    for (UINT32 index = 0; index < deviceCount; ++index) {
+        if (devices[index] == nullptr) {
+            continue;
+        }
+
+        if (const auto savedPath = captureFromDevice(devices[index], index, outputDirectory); savedPath.has_value()) {
+            freeDevices();
+            return savedPath;
+        }
+    }
+
     freeDevices();
-
-    if (FAILED(activateResult) || mediaSource == nullptr) {
-        appendDebugLog("camera: ActivateObject failed");
-        return std::nullopt;
-    }
-
-    ComPtr<IMFAttributes> sourceReaderAttributes;
-    if (FAILED(MFCreateAttributes(&sourceReaderAttributes, 2))) {
-        appendDebugLog("camera: MFCreateAttributes for source reader failed");
-        return std::nullopt;
-    }
-
-    if (FAILED(sourceReaderAttributes->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE))) {
-        appendDebugLog("camera: enabling video processing failed");
-        return std::nullopt;
-    }
-
-    ComPtr<IMFSourceReader> sourceReader;
-    if (FAILED(MFCreateSourceReaderFromMediaSource(mediaSource.Get(), sourceReaderAttributes.Get(), &sourceReader))) {
-        appendDebugLog("camera: MFCreateSourceReaderFromMediaSource failed");
-        return std::nullopt;
-    }
-
-    ComPtr<IMFMediaType> targetMediaType;
-    if (FAILED(MFCreateMediaType(&targetMediaType))) {
-        appendDebugLog("camera: MFCreateMediaType failed");
-        return std::nullopt;
-    }
-
-    if (FAILED(targetMediaType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)) ||
-        FAILED(targetMediaType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32)) ||
-        FAILED(sourceReader->SetCurrentMediaType(
-            static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
-            nullptr,
-            targetMediaType.Get()))) {
-        appendDebugLog("camera: SetCurrentMediaType RGB32 failed");
-        return std::nullopt;
-    }
-
-    ComPtr<IMFMediaType> currentMediaType;
-    if (FAILED(sourceReader->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), &currentMediaType))) {
-        appendDebugLog("camera: GetCurrentMediaType failed");
-        return std::nullopt;
-    }
-
-    UINT32 width = 0;
-    UINT32 height = 0;
-    if (!readFrameSize(currentMediaType.Get(), width, height) || width == 0 || height == 0) {
-        appendDebugLog("camera: invalid frame size");
-        return std::nullopt;
-    }
-    appendDebugLog("camera: frame size=" + std::to_string(width) + "x" + std::to_string(height));
-
-    appendDebugLog("camera: warming up for " + std::to_string(kCameraWarmupMilliseconds) + "ms");
-    Sleep(kCameraWarmupMilliseconds);
-
-    int capturedFrames = 0;
-    for (int attempt = 0; attempt < kMaxFrameAttempts; ++attempt) {
-        DWORD streamIndex = 0;
-        DWORD streamFlags = 0;
-        LONGLONG timestamp = 0;
-        ComPtr<IMFSample> sample;
-
-        const auto readResult = sourceReader->ReadSample(
-            static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
-            0,
-            &streamIndex,
-            &streamFlags,
-            &timestamp,
-            &sample);
-
-        if (FAILED(readResult)) {
-            appendDebugLog("camera: ReadSample failed");
-            return std::nullopt;
-        }
-
-        if ((streamFlags & MF_SOURCE_READERF_STREAMTICK) != 0 || sample == nullptr) {
-            appendDebugLog("camera: stream tick or null sample attempt=" + std::to_string(attempt));
-            Sleep(50);
-            continue;
-        }
-
-        ++capturedFrames;
-        if (capturedFrames <= kDiscardedWarmupFrames) {
-            appendDebugLog("camera: discarding warmup frame=" + std::to_string(capturedFrames));
-            Sleep(50);
-            continue;
-        }
-
-        ComPtr<IMFMediaBuffer> mediaBuffer;
-        if (FAILED(sample->ConvertToContiguousBuffer(&mediaBuffer)) || mediaBuffer == nullptr) {
-            appendDebugLog("camera: ConvertToContiguousBuffer failed");
-            return std::nullopt;
-        }
-
-        BYTE* data = nullptr;
-        DWORD maxLength = 0;
-        DWORD currentLength = 0;
-        if (FAILED(mediaBuffer->Lock(&data, &maxLength, &currentLength)) || data == nullptr || currentLength == 0) {
-            appendDebugLog("camera: mediaBuffer lock failed");
-            return std::nullopt;
-        }
-
-        const LONG stride = static_cast<LONG>(width * 4);
-        const auto savedPath = saveFrameAsJpeg(outputDirectory, data, width, height, stride);
-        mediaBuffer->Unlock();
-        appendDebugLog("camera: save result=" + std::string(savedPath.has_value() ? *savedPath : "null"));
-        return savedPath;
-    }
-
-    appendDebugLog("camera: no sample received after retries");
+    appendDebugLog("camera: no enumerated device produced a frame");
     return std::nullopt;
 #else
     (void) outputDirectory;

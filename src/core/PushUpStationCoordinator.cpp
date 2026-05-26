@@ -1,11 +1,9 @@
 #include "companion/core/PushUpStationCoordinator.h"
+#include "companion/support/LocalLog.h"
 
 #include <cstdlib>
 #include <chrono>
-#include <filesystem>
-#include <fstream>
 #include <sstream>
-#include <ctime>
 #include <utility>
 
 namespace companion::core {
@@ -17,43 +15,8 @@ constexpr auto kStartSyncRetryInterval = std::chrono::seconds(2);
 constexpr auto kStateLogInterval = std::chrono::seconds(5);
 constexpr int kMaxLaunchFailures = 3;
 
-std::filesystem::path debugLogPath() {
-#ifdef _WIN32
-    if (const char* programData = std::getenv("ProgramData"); programData != nullptr && *programData != '\0') {
-        return std::filesystem::path(programData) / "AIRCompanion" / "Logs" / "debug.log";
-    }
-#endif
-    if (const char* appData = std::getenv("APPDATA"); appData != nullptr && *appData != '\0') {
-        return std::filesystem::path(appData) / "AIRCompanion" / "debug.log";
-    }
-    return std::filesystem::path(".") / "AIRCompanion" / "Logs" / "debug.log";
-}
-
-std::string timestamp() {
-    const auto now = std::chrono::system_clock::now();
-    const auto time = std::chrono::system_clock::to_time_t(now);
-    std::tm localTime{};
-#ifdef _WIN32
-    localtime_s(&localTime, &time);
-#else
-    localtime_r(&time, &localTime);
-#endif
-    char buffer[32]{};
-    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &localTime);
-    return buffer;
-}
-
 void appendDebugLog(const std::string& line) {
-    const auto logPath = debugLogPath();
-    std::error_code errorCode;
-    std::filesystem::create_directories(logPath.parent_path(), errorCode);
-
-    std::ofstream output(logPath, std::ios::app);
-    if (!output.is_open()) {
-        return;
-    }
-
-    output << timestamp() << " " << line << '\n';
+    companion::support::appendDebugLog(line);
 }
 
 std::string adapterStateSummary(const adapters::PushUpCounterState& state) {

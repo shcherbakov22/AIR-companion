@@ -1,9 +1,8 @@
 #include "companion/networking/CompanionApiClient.h"
 #include "companion/networking/CompanionApiParsers.h"
+#include "companion/support/LocalLog.h"
 
-#include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <sstream>
 #include <charconv>
 #include <utility>
@@ -236,26 +235,20 @@ std::string jsonInstalledAppsArray(const std::vector<models::InstalledAppEntry>&
     return out.str();
 }
 
-void appendDebugLog(const std::string& line) {
-#ifdef _WIN32
-    const char* appData = std::getenv("APPDATA");
-    if (appData == nullptr || *appData == '\0') {
-        return;
+std::string jsonAppEnforcementFailuresArray(const std::vector<std::string>& values) {
+    std::ostringstream out;
+    out << "[";
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        out << "{"
+            << "\"app_name\":" << jsonString(values[index]) << ","
+            << "\"reason\":\"terminate_failed\""
+            << "}";
     }
-
-    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
-    std::error_code errorCode;
-    std::filesystem::create_directories(logDirectory, errorCode);
-
-    std::ofstream output(logDirectory / "debug.log", std::ios::app);
-    if (!output.is_open()) {
-        return;
-    }
-
-    output << line << '\n';
-#else
-    (void) line;
-#endif
+    out << "]";
+    return out.str();
 }
 
 std::map<std::string, std::string> jsonHeaders(const std::string& deviceToken = {}) {
@@ -324,7 +317,7 @@ RenewTokenResult CompanionApiClient::renewToken(const std::string& deviceToken) 
         jsonHeaders(deviceToken),
         "{}"
     );
-    appendDebugLog(
+    companion::support::appendDebugLog(
         "renewToken status=" + std::to_string(response.statusCode)
         + " body=" + response.body
     );
@@ -361,27 +354,40 @@ std::optional<std::string> CompanionApiClient::createBrowserLoginUrl(const std::
 std::optional<models::DevicePolicy> CompanionApiClient::fetchPolicy(const std::string& deviceToken) const {
     const auto response = m_httpClient.get(m_baseUrl + "/api/companion/policy", jsonHeaders(deviceToken));
     if (response.statusCode < 200 || response.statusCode >= 300) {
+        companion::support::appendDebugLog("policy fetch failed status=" + std::to_string(response.statusCode));
         return std::nullopt;
     }
 
-    return parsePolicyResponse(response.body);
+    auto policy = parsePolicyResponse(response.body);
+    if (policy.has_value()) {
+        companion::support::appendDebugLog(
+            "policy fetch ok hash=" + policy->policyHash
+            + " browser_tracking=" + std::string(policy->browserTrackingEnabled ? "enabled" : "disabled")
+            + " blocked_apps=" + std::to_string(policy->blockedApps.size())
+            + " kill_gui_apps=" + std::string(policy->violationAppEnforcement.killGuiApps ? "true" : "false")
+        );
+    } else {
+        companion::support::appendDebugLog("policy fetch parse failed status=" + std::to_string(response.statusCode));
+    }
+
+    return policy;
 }
 
 std::vector<models::DeviceCommand> CompanionApiClient::fetchCommands(const std::string& deviceToken) const {
     const auto response = m_httpClient.get(m_baseUrl + "/api/companion/commands/next", jsonHeaders(deviceToken));
-    appendDebugLog("fetchCommands status=" + std::to_string(response.statusCode) + " body=" + response.body);
+    companion::support::appendDebugLog("fetchCommands status=" + std::to_string(response.statusCode) + " body=" + response.body);
     if (response.statusCode < 200 || response.statusCode >= 300) {
         return {};
     }
 
     const auto commands = parseCommandResponse(response.body);
     if (commands.empty()) {
-        appendDebugLog("fetchCommands parsed empty command id");
+        companion::support::appendDebugLog("fetchCommands parsed empty command id");
         return {};
     }
 
     const auto& command = commands.front();
-    appendDebugLog("fetchCommands parsed command id=" + command.id + " type=" + std::to_string(static_cast<int>(command.type)));
+    companion::support::appendDebugLog("fetchCommands parsed command id=" + command.id + " type=" + std::to_string(static_cast<int>(command.type)));
 
     return commands;
 }
@@ -392,7 +398,7 @@ bool CompanionApiClient::acknowledgeCommand(const std::string& deviceToken, cons
         jsonHeaders(deviceToken),
         "{}"
     );
-    appendDebugLog("acknowledgeCommand id=" + commandId + " status=" + std::to_string(response.statusCode) + " body=" + response.body);
+    companion::support::appendDebugLog("acknowledgeCommand id=" + commandId + " status=" + std::to_string(response.statusCode) + " body=" + response.body);
     return response.statusCode >= 200 && response.statusCode < 300;
 }
 
@@ -410,7 +416,7 @@ bool CompanionApiClient::submitCommandResult(const std::string& deviceToken,
         jsonHeaders(deviceToken),
         body.str()
     );
-    appendDebugLog("submitCommandResult id=" + commandId + " success=" + std::string(success ? "true" : "false") + " status=" + std::to_string(response.statusCode) + " body=" + response.body);
+    companion::support::appendDebugLog("submitCommandResult id=" + commandId + " success=" + std::string(success ? "true" : "false") + " status=" + std::to_string(response.statusCode) + " body=" + response.body);
     return response.statusCode >= 200 && response.statusCode < 300;
 }
 
@@ -466,6 +472,9 @@ bool CompanionApiClient::sendActivity(const std::string& deviceToken, const mode
         jsonHeaders(deviceToken),
         focusedBody.str()
     );
+    if (focusedResponse.statusCode < 200 || focusedResponse.statusCode >= 300) {
+        companion::support::appendDebugLog("activity focused_app failed status=" + std::to_string(focusedResponse.statusCode));
+    }
 
     std::ostringstream openAppsBody;
     openAppsBody << "{"
@@ -482,6 +491,9 @@ bool CompanionApiClient::sendActivity(const std::string& deviceToken, const mode
         jsonHeaders(deviceToken),
         openAppsBody.str()
     );
+    if (openAppsResponse.statusCode < 200 || openAppsResponse.statusCode >= 300) {
+        companion::support::appendDebugLog("activity open_apps failed status=" + std::to_string(openAppsResponse.statusCode));
+    }
 
     return focusedResponse.statusCode >= 200 && focusedResponse.statusCode < 300
         && openAppsResponse.statusCode >= 200 && openAppsResponse.statusCode < 300;
@@ -499,6 +511,30 @@ bool CompanionApiClient::sendInstalledApps(const std::string& deviceToken, const
         m_baseUrl + "/api/companion/activity",
         jsonHeaders(deviceToken),
         body.str()
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+        companion::support::appendDebugLog("activity installed_apps failed status=" + std::to_string(response.statusCode));
+    }
+
+    return response.statusCode >= 200 && response.statusCode < 300;
+}
+
+bool CompanionApiClient::sendAppEnforcementReport(const std::string& deviceToken, const std::vector<std::string>& failures) const {
+    std::ostringstream body;
+    body << "{"
+         << "\"event_type\":\"app_enforcement\","
+         << "\"payload\":{"
+         << "\"failures\":" << jsonAppEnforcementFailuresArray(failures)
+         << "}}";
+
+    const auto response = m_httpClient.post(
+        m_baseUrl + "/api/companion/activity",
+        jsonHeaders(deviceToken),
+        body.str()
+    );
+    companion::support::appendDebugLog(
+        "activity app_enforcement failures=" + std::to_string(failures.size())
+        + " status=" + std::to_string(response.statusCode)
     );
 
     return response.statusCode >= 200 && response.statusCode < 300;
@@ -524,7 +560,7 @@ bool CompanionApiClient::uploadScreenCapture(const std::string& deviceToken,
     );
     std::error_code errorCode;
     const auto fileSize = std::filesystem::file_size(filePath, errorCode);
-    appendDebugLog(
+    companion::support::appendDebugLog(
         "uploadScreenCapture path=" + filePath
         + " size=" + std::to_string(errorCode ? 0 : fileSize)
         + " status=" + std::to_string(response.statusCode)
@@ -553,7 +589,7 @@ bool CompanionApiClient::uploadCameraCapture(const std::string& deviceToken,
     );
     std::error_code errorCode;
     const auto fileSize = std::filesystem::file_size(filePath, errorCode);
-    appendDebugLog(
+    companion::support::appendDebugLog(
         "uploadCameraCapture path=" + filePath
         + " size=" + std::to_string(errorCode ? 0 : fileSize)
         + " status=" + std::to_string(response.statusCode)

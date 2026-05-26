@@ -1,10 +1,9 @@
 #include "companion/core/Agent.h"
+#include "companion/support/LocalLog.h"
 
 #include <chrono>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
 #include <optional>
+#include <sstream>
 #include <utility>
 
 namespace companion::core {
@@ -45,26 +44,19 @@ std::optional<std::string> jsonStringValue(const std::string& body, const std::s
     return std::nullopt;
 }
 
-void appendDebugLog(const std::string& line) {
-#ifdef _WIN32
-    const char* appData = std::getenv("APPDATA");
-    if (appData == nullptr || *appData == '\0') {
-        return;
-    }
-
-    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
-    std::error_code errorCode;
-    std::filesystem::create_directories(logDirectory, errorCode);
-
-    std::ofstream output(logDirectory / "debug.log", std::ios::app);
-    if (!output.is_open()) {
-        return;
-    }
-
-    output << line << '\n';
-#else
-    (void) line;
-#endif
+std::string policySummary(const models::DevicePolicy& policy, const models::ActivitySnapshot& snapshot) {
+    std::ostringstream out;
+    out << "policy hash=" << policy.policyHash
+        << " task=" << (policy.activeTaskName.empty() ? "(none)" : policy.activeTaskName)
+        << " open_violations=" << (policy.hasOpenViolations ? "true" : "false")
+        << " kill_gui_apps=" << (policy.violationAppEnforcement.killGuiApps ? "true" : "false")
+        << " browser_grace_seconds=" << policy.violationAppEnforcement.browserReopenGraceSeconds
+        << " browser_tracking=" << (policy.browserTrackingEnabled ? "enabled" : "disabled")
+        << " blocked_apps=" << policy.blockedApps.size()
+        << " open_apps=" << snapshot.openApps.size()
+        << " focused_app=" << snapshot.focusedApp
+        << " active_domain=" << snapshot.activeBrowserDomain;
+    return out.str();
 }
 
 }  // namespace
@@ -99,11 +91,13 @@ Agent::Agent(PolicySync policySync,
 void Agent::start() {
     m_running = true;
     m_status = "running";
+    companion::support::appendDebugLog("agent started log_dir=" + companion::support::localLogDirectory());
 }
 
 void Agent::stop() {
     m_running = false;
     m_status = "stopped";
+    companion::support::appendDebugLog("agent stopped");
 }
 
 void Agent::tick() {
@@ -124,16 +118,33 @@ void Agent::tick() {
     snapshot.installedApps = m_cachedInstalledApps;
     auto policy = m_policySync.refresh();
     if (policy.has_value()) {
+        if (policy->policyHash != m_lastLoggedPolicyHash) {
+            companion::support::appendDebugLog("policy sync: " + policySummary(*policy, snapshot));
+            m_lastLoggedPolicyHash = policy->policyHash;
+        }
         m_captureScheduler.updatePolicy(*policy);
-        m_enforcementCoordinator.applyPolicy(*policy, snapshot);
+        m_uplinkSync.reportAppEnforcementFailures(m_enforcementCoordinator.applyPolicy(*policy, snapshot));
         m_lastPolicy = *policy;
         m_status = "policy synced: " + policy->policyHash;
     }
 
-    m_uplinkSync.sync(snapshot, policy.has_value() ? policy : m_lastPolicy);
+    const bool activityWasSent = m_uplinkSync.sync(snapshot, policy.has_value() ? policy : m_lastPolicy);
+    if (activityWasSent) {
+        auto refreshedPolicy = m_policySync.refresh();
+        if (refreshedPolicy.has_value()) {
+            if (refreshedPolicy->policyHash != m_lastLoggedPolicyHash) {
+                companion::support::appendDebugLog("policy sync after activity: " + policySummary(*refreshedPolicy, snapshot));
+                m_lastLoggedPolicyHash = refreshedPolicy->policyHash;
+            }
+            m_captureScheduler.updatePolicy(*refreshedPolicy);
+            m_uplinkSync.reportAppEnforcementFailures(m_enforcementCoordinator.applyPolicy(*refreshedPolicy, snapshot));
+            m_lastPolicy = *refreshedPolicy;
+            m_status = "policy synced after activity: " + refreshedPolicy->policyHash;
+        }
+    }
 
     for (const auto& command : m_commandPoller.poll()) {
-        appendDebugLog("agent command received id=" + command.id);
+        companion::support::appendDebugLog("agent command received id=" + command.id);
         m_commandPoller.acknowledge(command.id);
         bool success = true;
         std::string output = "completed";
@@ -151,7 +162,7 @@ void Agent::tick() {
                     success = true;
                     output = "screen capture uploaded";
                 }
-                appendDebugLog("agent screenshot command success=" + std::string(success ? "true" : "false"));
+                companion::support::appendDebugLog("agent screenshot command success=" + std::string(success ? "true" : "false"));
                 break;
             }
             case models::DeviceCommandType::RequestCameraCapture: {
@@ -166,7 +177,7 @@ void Agent::tick() {
                     success = true;
                     output = "camera capture uploaded";
                 }
-                appendDebugLog("agent camera command success=" + std::string(success ? "true" : "false") + " path=" + (path.has_value() ? *path : std::string{}));
+                companion::support::appendDebugLog("agent camera command success=" + std::string(success ? "true" : "false") + " path=" + (path.has_value() ? *path : std::string{}));
                 break;
             }
             case models::DeviceCommandType::VerifyRemoteControl: {
@@ -188,7 +199,7 @@ void Agent::tick() {
                 const auto result = m_enforcementCoordinator.applyCommand(command);
                 success = result.success;
                 output = result.output;
-                appendDebugLog("agent non-capture command processed");
+                companion::support::appendDebugLog("agent non-capture command processed");
                 break;
             }
         }

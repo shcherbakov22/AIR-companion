@@ -53,7 +53,7 @@ public:
 class WindowsEnforcementAdapter final : public IEnforcementAdapter {
 public:
     void applyPolicy(const models::DevicePolicy& policy, const models::ActivitySnapshot& snapshot) override;
-    void terminateBlockedApps(const std::vector<std::string>& blockedApps) override;
+    std::vector<std::string> terminateBlockedApps(const std::vector<std::string>& blockedApps) override;
     bool showMessage(const std::string& title, const std::string& body, int displaySeconds, std::string& error) override;
     std::string describeState() const override;
 

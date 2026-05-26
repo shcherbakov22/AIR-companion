@@ -1,4 +1,5 @@
 #include "companion/adapters/windows/WindowsAdapters.h"
+#include "companion/support/LocalLog.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -31,25 +32,7 @@ constexpr int kOutputHeight = 840;
 constexpr ULONG kJpegQuality = 88;
 
 void appendDebugLog(const std::string& line) {
-#ifdef _WIN32
-    const char* appData = std::getenv("APPDATA");
-    if (appData == nullptr || *appData == '\0') {
-        return;
-    }
-
-    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
-    std::error_code errorCode;
-    std::filesystem::create_directories(logDirectory, errorCode);
-
-    std::ofstream output(logDirectory / "debug.log", std::ios::app);
-    if (!output.is_open()) {
-        return;
-    }
-
-    output << line << '\n';
-#else
-    (void) line;
-#endif
+    companion::support::appendDebugLog(line);
 }
 
 class GdiPlusSession {

@@ -1,4 +1,5 @@
 #include "companion/service/UpdateCoordinator.h"
+#include "companion/support/LocalLog.h"
 
 #include <algorithm>
 #include <cctype>
@@ -26,28 +27,6 @@ namespace {
 constexpr auto kUpdateCheckInterval = std::chrono::minutes(15);
 constexpr auto kUpdateFailureRetryInterval = std::chrono::minutes(1);
 constexpr auto kUpdateLaunchGracePeriod = std::chrono::minutes(2);
-
-void appendDebugLog(const std::string& line) {
-#ifdef _WIN32
-    const char* appData = std::getenv("APPDATA");
-    if (appData == nullptr || *appData == '\0') {
-        return;
-    }
-
-    const auto logDirectory = std::filesystem::path(appData) / "AIRCompanion";
-    std::error_code errorCode;
-    std::filesystem::create_directories(logDirectory, errorCode);
-
-    std::ofstream output(logDirectory / "debug.log", std::ios::app);
-    if (!output.is_open()) {
-        return;
-    }
-
-    output << line << '\n';
-#else
-    (void) line;
-#endif
-}
 
 std::optional<std::string> extractJsonString(const std::string& body, const std::string& key) {
     const auto keyPos = body.find("\"" + key + "\"");
@@ -133,7 +112,7 @@ void UpdateCoordinator::tick() {
         if ((std::chrono::steady_clock::now() - m_updateLaunchedAt) >= kUpdateLaunchGracePeriod) {
             m_updateInProgress = false;
             m_status = "update retry after stalled launch";
-            appendDebugLog("update: updater grace period expired; retrying checks");
+            companion::support::appendDebugLog("update check: updater grace period expired; retrying checks current=" + m_currentVersion);
         } else {
             return;
         }
@@ -144,25 +123,31 @@ void UpdateCoordinator::tick() {
     }
 
     m_lastCheck = std::chrono::steady_clock::now();
+    companion::support::appendDebugLog("update check: started current=" + m_currentVersion);
     const auto manifest = m_apiClient.fetchUpdateManifest();
     if (!manifest.has_value() || !manifest->available) {
         m_status = "updates unavailable";
-        appendDebugLog("update: manifest unavailable");
+        companion::support::appendDebugLog("update check: manifest unavailable current=" + m_currentVersion);
         scheduleFailureRetry();
         return;
     }
 
     if (!isNewerVersion(manifest->version, m_currentVersion)) {
         m_status = "updates current";
-        appendDebugLog("update: current version " + m_currentVersion + " already satisfies manifest " + manifest->version);
+        companion::support::appendDebugLog("update check: current version " + m_currentVersion + " already satisfies manifest " + manifest->version);
         return;
     }
 
-    appendDebugLog("update: manifest version=" + manifest->version + " current=" + m_currentVersion);
+    companion::support::appendDebugLog(
+        "update check: update available manifest=" + manifest->version
+        + " current=" + m_currentVersion
+        + " size=" + std::to_string(manifest->sizeBytes)
+        + " url=" + manifest->downloadUrl
+    );
     const auto packagePath = stagePackagePath(*manifest);
     if (!m_apiClient.downloadFile(manifest->downloadUrl, packagePath)) {
         m_status = "update download failed";
-        appendDebugLog("update: download failed version=" + manifest->version);
+        companion::support::appendDebugLog("update download: failed version=" + manifest->version + " path=" + packagePath);
         scheduleFailureRetry();
         return;
     }
@@ -171,7 +156,7 @@ void UpdateCoordinator::tick() {
     const auto downloadedSize = std::filesystem::file_size(packagePath, fileSizeError);
     if (fileSizeError || (manifest->sizeBytes > 0 && downloadedSize != manifest->sizeBytes)) {
         m_status = "update download size mismatch";
-        appendDebugLog("update: size mismatch path=" + packagePath + " expected=" + std::to_string(manifest->sizeBytes) + " actual=" + std::to_string(fileSizeError ? 0 : downloadedSize));
+        companion::support::appendDebugLog("update download: size mismatch path=" + packagePath + " expected=" + std::to_string(manifest->sizeBytes) + " actual=" + std::to_string(fileSizeError ? 0 : downloadedSize));
         std::error_code errorCode;
         std::filesystem::remove(packagePath, errorCode);
         scheduleFailureRetry();
@@ -180,7 +165,7 @@ void UpdateCoordinator::tick() {
 
     if (!verifyChecksum(packagePath, manifest->sha256)) {
         m_status = "update checksum failed";
-        appendDebugLog("update: checksum failed path=" + packagePath);
+        companion::support::appendDebugLog("update download: checksum failed path=" + packagePath + " expected_sha256=" + manifest->sha256);
         std::error_code errorCode;
         std::filesystem::remove(packagePath, errorCode);
         scheduleFailureRetry();
@@ -189,7 +174,7 @@ void UpdateCoordinator::tick() {
 
     if (!launchUpdater(packagePath)) {
         m_status = "update launch failed";
-        appendDebugLog("update: launch failed package=" + packagePath);
+        companion::support::appendDebugLog("update launch: failed package=" + packagePath + " current=" + m_currentVersion + " target=" + manifest->version);
         scheduleFailureRetry();
         return;
     }
@@ -197,7 +182,7 @@ void UpdateCoordinator::tick() {
     m_updateInProgress = true;
     m_updateLaunchedAt = std::chrono::steady_clock::now();
     m_status = "update launched " + manifest->version;
-    appendDebugLog("update: launched updater for version=" + manifest->version + " package=" + packagePath);
+    companion::support::appendDebugLog("update launch: launched updater for version=" + manifest->version + " package=" + packagePath);
 }
 
 std::string UpdateCoordinator::statusSummary() const {

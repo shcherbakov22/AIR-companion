@@ -1,3 +1,5 @@
+#include "companion/support/LocalLog.h"
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -387,34 +389,48 @@ bool copyExtractedFiles(const std::filesystem::path& sourceRoot, const std::file
 int main(int argc, char** argv) {
     const auto options = parseArgs(argc, argv);
     if (!options.has_value()) {
+        companion::support::appendDebugLog("updater failed: invalid arguments");
         std::cerr << "Usage: air_companion_updater --service-name <name> --package <zip> --target-dir <dir>\n";
         return 1;
     }
 
 #ifdef _WIN32
+    companion::support::appendDebugLog(
+        "updater started service=" + options->serviceName
+        + " package=" + options->packagePath
+        + " target_dir=" + options->targetDirectory
+    );
+
     const auto serviceName = utf8ToWide(options->serviceName);
     if (serviceName.empty()) {
+        companion::support::appendDebugLog("updater failed: invalid service name");
         return 1;
     }
 
     if (!stopService(serviceName)) {
+        companion::support::appendDebugLog("updater failed: stop service failed service=" + options->serviceName);
         return 1;
     }
+    companion::support::appendDebugLog("updater stopped service=" + options->serviceName);
     stopCompanionUserProcesses();
+    companion::support::appendDebugLog("updater stopped user processes");
 
     const auto extractDirectory = std::filesystem::temp_directory_path() / "AIRCompanion" / "UpdateExtract";
     std::error_code errorCode;
     std::filesystem::remove_all(extractDirectory, errorCode);
     std::filesystem::create_directories(extractDirectory, errorCode);
     if (errorCode) {
+        companion::support::appendDebugLog("updater failed: create extract directory error=" + errorCode.message());
         startService(serviceName);
         return 1;
     }
 
     if (!extractArchive(options->packagePath, extractDirectory)) {
+        companion::support::appendDebugLog("updater failed: extract archive package=" + options->packagePath);
         startService(serviceName);
         return 1;
     }
+    companion::support::appendDebugLog("updater extracted package=" + options->packagePath + " to=" + extractDirectory.string());
 
     auto sourceRoot = extractDirectory;
     const auto firstLevelEntries = [&extractDirectory] {
@@ -429,20 +445,26 @@ int main(int argc, char** argv) {
     }
 
     if (!copyExtractedFiles(sourceRoot, options->targetDirectory)) {
+        companion::support::appendDebugLog("updater failed: copy files source=" + sourceRoot.string() + " target=" + options->targetDirectory);
         startService(serviceName);
         return 1;
     }
+    companion::support::appendDebugLog("updater copied files target=" + options->targetDirectory);
 
     if (!configureServiceRecovery(serviceName)
         || !ensureWatchdogTasks(serviceName)
         || !protectCompanionStorage(options->targetDirectory)) {
+        companion::support::appendDebugLog("updater failed: post-copy service recovery/watchdog/permissions step failed");
         startService(serviceName);
         return 1;
     }
 
-    return startService(serviceName) ? 0 : 1;
+    const bool started = startService(serviceName);
+    companion::support::appendDebugLog("updater finished start_service=" + std::string(started ? "true" : "false"));
+    return started ? 0 : 1;
 #else
     (void) options;
+    companion::support::appendDebugLog("updater failed: unsupported platform");
     return 1;
 #endif
 }

@@ -1,4 +1,5 @@
 #include "companion/adapters/windows/WindowsAdapters.h"
+#include "companion/support/LocalLog.h"
 
 #ifdef _WIN32
 #include <algorithm>
@@ -179,22 +180,40 @@ std::unordered_set<std::string> normalizedBlockedApps(const std::vector<std::str
     return names;
 }
 
-void terminateProcessesByName(const std::unordered_set<std::string>& blockedApps) {
+std::string lastErrorText() {
+    return std::to_string(GetLastError());
+}
+
+std::vector<std::string> terminateProcessesByName(
+    const std::unordered_set<std::string>& blockedApps,
+    const std::string& reason
+) {
+    std::vector<std::string> failures;
     if (blockedApps.empty()) {
-        return;
+        companion::support::appendDebugLog("app close skipped: no targets reason=" + reason);
+        return failures;
     }
+
+    companion::support::appendDebugLog(
+        "app close scan started reason=" + reason
+        + " target_count=" + std::to_string(blockedApps.size())
+    );
 
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) {
-        return;
+        companion::support::appendDebugLog("app close scan failed: process snapshot unavailable reason=" + reason + " error=" + lastErrorText());
+        failures.emplace_back("process snapshot unavailable");
+        return failures;
     }
 
     PROCESSENTRY32 processEntry{};
     processEntry.dwSize = sizeof(PROCESSENTRY32);
 
     if (!Process32First(snapshot, &processEntry)) {
+        companion::support::appendDebugLog("app close scan failed: process snapshot empty reason=" + reason + " error=" + lastErrorText());
         CloseHandle(snapshot);
-        return;
+        failures.emplace_back("process snapshot empty");
+        return failures;
     }
 
     do {
@@ -204,19 +223,36 @@ void terminateProcessesByName(const std::unordered_set<std::string>& blockedApps
         }
 
         if (isProtectedProcessName(name)) {
+            companion::support::appendDebugLog("app close skipped protected process=" + name + " pid=" + std::to_string(processEntry.th32ProcessID) + " reason=" + reason);
             continue;
         }
 
+        companion::support::appendDebugLog("app close attempt process=" + name + " pid=" + std::to_string(processEntry.th32ProcessID) + " reason=" + reason);
         HANDLE process = OpenProcess(PROCESS_TERMINATE, FALSE, processEntry.th32ProcessID);
         if (process == nullptr) {
+            companion::support::appendDebugLog("app close failed open_process process=" + name + " pid=" + std::to_string(processEntry.th32ProcessID) + " reason=" + reason + " error=" + lastErrorText());
+            failures.push_back(name);
             continue;
         }
 
-        TerminateProcess(process, 1);
+        if (!TerminateProcess(process, 1)) {
+            companion::support::appendDebugLog("app close failed terminate process=" + name + " pid=" + std::to_string(processEntry.th32ProcessID) + " reason=" + reason + " error=" + lastErrorText());
+            failures.push_back(name);
+        } else {
+            companion::support::appendDebugLog("app close success process=" + name + " pid=" + std::to_string(processEntry.th32ProcessID) + " reason=" + reason);
+        }
         CloseHandle(process);
     } while (Process32Next(snapshot, &processEntry));
 
     CloseHandle(snapshot);
+
+    std::sort(failures.begin(), failures.end());
+    failures.erase(std::unique(failures.begin(), failures.end()), failures.end());
+    companion::support::appendDebugLog(
+        "app close scan finished reason=" + reason
+        + " failure_count=" + std::to_string(failures.size())
+    );
+    return failures;
 }
 
 }  // namespace
@@ -285,6 +321,14 @@ std::unordered_set<std::string> WindowsEnforcementAdapter::violationKillTargets(
 
 void WindowsEnforcementAdapter::applyPolicy(const models::DevicePolicy& policy, const models::ActivitySnapshot& snapshot) {
     m_lastState = "policy applied";
+    companion::support::appendDebugLog(
+        "enforcement policy applied open_violations=" + std::string(policy.hasOpenViolations ? "true" : "false")
+        + " kill_gui_apps=" + std::string(policy.violationAppEnforcement.killGuiApps ? "true" : "false")
+        + " blocked_apps=" + std::to_string(policy.blockedApps.size())
+        + " browser_tracking=" + std::string(policy.browserTrackingEnabled ? "enabled" : "disabled")
+        + " focused_app=" + snapshot.focusedApp
+        + " active_domain=" + snapshot.activeBrowserDomain
+    );
 
     if (policy.hasUnreadMentorChat || policy.hasUnreadAnnouncements) {
         m_lastState += " + communication gate";
@@ -298,21 +342,27 @@ void WindowsEnforcementAdapter::applyPolicy(const models::DevicePolicy& policy, 
     if (!violationTargets.empty()) {
         m_lastState += " + stale violation gui kill";
 #ifdef _WIN32
-        terminateProcessesByName(violationTargets);
+        (void) terminateProcessesByName(violationTargets, "open_violation_close_all_apps");
 #endif
     }
 }
 
-void WindowsEnforcementAdapter::terminateBlockedApps(const std::vector<std::string>& blockedApps) {
+std::vector<std::string> WindowsEnforcementAdapter::terminateBlockedApps(const std::vector<std::string>& blockedApps) {
     if (blockedApps.empty()) {
-        return;
+        return {};
     }
 
     m_lastState += " + blocked apps";
 
 #ifdef _WIN32
     const auto normalized = normalizedBlockedApps(blockedApps);
-    terminateProcessesByName(normalized);
+    companion::support::appendDebugLog(
+        "blocked app enforcement requested configured_count=" + std::to_string(blockedApps.size())
+        + " normalized_count=" + std::to_string(normalized.size())
+    );
+    return terminateProcessesByName(normalized, "blocked_program_policy");
+#else
+    return {};
 #endif
 }
 

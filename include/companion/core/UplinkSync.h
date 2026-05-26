@@ -3,6 +3,7 @@
 #include <chrono>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "companion/adapters/INetworkConfigurationAdapter.h"
 #include "companion/models/ActivitySnapshot.h"
@@ -19,19 +20,22 @@ public:
                models::DeviceIdentity identity,
                adapters::INetworkConfigurationAdapter& networkConfigurationAdapter);
 
-    void sync(const models::ActivitySnapshot& snapshot, const std::optional<models::DevicePolicy>& policy);
+    bool sync(const models::ActivitySnapshot& snapshot, const std::optional<models::DevicePolicy>& policy);
     bool uploadScreenCapture(const std::string& filePath,
                              const models::ActivitySnapshot& snapshot,
                              const std::string& contentType);
     bool uploadCameraCapture(const std::string& filePath,
                              const models::ActivitySnapshot& snapshot,
                              const std::string& contentType);
+    bool reportAppEnforcementFailures(const std::vector<std::string>& failures);
     std::string statusSummary() const;
 
 private:
     bool shouldSendHeartbeat(std::chrono::steady_clock::time_point now) const;
-    bool shouldSendActivity(std::chrono::steady_clock::time_point now) const;
+    bool shouldSendActivity(std::chrono::steady_clock::time_point now, const std::string& openAppsSignature) const;
     bool shouldSendInstalledApps(std::chrono::steady_clock::time_point now) const;
+    std::string openAppsSignature(const std::vector<models::OpenAppEntry>& openApps) const;
+    std::string enforcementFailureSignature(std::vector<std::string> failures) const;
     networking::CompanionApiClient m_apiClient;
     std::string m_deviceToken;
     models::DeviceIdentity m_identity;
@@ -42,6 +46,8 @@ private:
     bool m_hasHeartbeat{false};
     bool m_hasActivity{false};
     bool m_hasInstalledApps{false};
+    std::string m_lastOpenAppsSignature;
+    std::string m_lastEnforcementFailureSignature;
     std::string m_status{"uplink idle"};
 };
 

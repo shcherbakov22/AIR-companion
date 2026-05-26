@@ -16,7 +16,7 @@ public:
 
     explicit EnforcementCoordinator(adapters::IEnforcementAdapter& enforcementAdapter);
 
-    void applyPolicy(const models::DevicePolicy& policy, const models::ActivitySnapshot& snapshot);
+    std::vector<std::string> applyPolicy(const models::DevicePolicy& policy, const models::ActivitySnapshot& snapshot);
     CommandExecutionResult applyCommand(const models::DeviceCommand& command);
 
 private:

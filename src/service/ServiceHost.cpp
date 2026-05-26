@@ -1,9 +1,7 @@
 #include "companion/service/ServiceHost.h"
+#include "companion/support/LocalLog.h"
 
 #include <chrono>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
 #include <thread>
 
 #ifdef _WIN32
@@ -22,21 +20,7 @@ constexpr wchar_t kServiceName[] = L"AIRCompanion";
 #endif
 
 void appendServiceLog(const std::string& line) {
-    const char* programData = std::getenv("PROGRAMDATA");
-    if (programData == nullptr || *programData == '\0') {
-        return;
-    }
-
-    const auto logDirectory = std::filesystem::path(programData) / "AIRCompanion" / "Logs";
-    std::error_code errorCode;
-    std::filesystem::create_directories(logDirectory, errorCode);
-
-    std::ofstream output(logDirectory / "service-host.log", std::ios::app);
-    if (!output.is_open()) {
-        return;
-    }
-
-    output << line << '\n';
+    companion::support::appendLocalLog("service-host.log", line);
 }
 
 }  // namespace

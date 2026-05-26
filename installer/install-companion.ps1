@@ -124,7 +124,7 @@ function Ensure-ServiceWatchdogTasks {
     }
 }
 
-function Protect-CompanionPath {
+function Set-CompanionPathPermissions {
     param(
         [string]$Path,
         [ValidateSet('None', 'ReadExecute', 'Modify')]
@@ -146,21 +146,30 @@ function Protect-CompanionPath {
         $grants += '*S-1-5-32-545:(OI)(CI)M' # Users
     }
 
-    & icacls.exe $Path /inheritance:r /grant:r $grants /T /C | Out-Null
+    & icacls.exe $Path /inheritance:e /grant:r $grants /T /C | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to protect ACLs for $Path."
+        throw "Failed to set ACLs for $Path."
     }
 }
 
-function Protect-CompanionStorage {
+function Set-CompanionStoragePermissions {
     param(
         [string]$InstallDirectory
     )
 
-    Protect-CompanionPath -Path $InstallDirectory -UsersAccess ReadExecute
-    Protect-CompanionPath -Path (Join-Path $env:ProgramData 'AIRCompanion\Service')
-    Protect-CompanionPath -Path (Join-Path $env:ProgramData 'AIRCompanion\Internal')
-    Protect-CompanionPath -Path (Join-Path $env:PUBLIC 'AIRCompanion\InteractiveCapture') -UsersAccess Modify
+    $programDataRoot = Join-Path $env:ProgramData 'AIRCompanion'
+    $publicRoot = Join-Path $env:PUBLIC 'AIRCompanion'
+    $systemProfileDataRoot = Join-Path $env:windir 'System32\config\systemprofile\AppData\Roaming\AIRCompanion'
+
+    Set-CompanionPathPermissions -Path $InstallDirectory -UsersAccess ReadExecute
+    Set-CompanionPathPermissions -Path $programDataRoot -UsersAccess Modify
+    Set-CompanionPathPermissions -Path (Join-Path $programDataRoot 'Service') -UsersAccess Modify
+    Set-CompanionPathPermissions -Path (Join-Path $programDataRoot 'Internal') -UsersAccess Modify
+    Set-CompanionPathPermissions -Path (Join-Path $programDataRoot 'Captures') -UsersAccess Modify
+    Set-CompanionPathPermissions -Path (Join-Path $programDataRoot 'Logs') -UsersAccess Modify
+    Set-CompanionPathPermissions -Path $systemProfileDataRoot -UsersAccess Modify
+    Set-CompanionPathPermissions -Path $publicRoot -UsersAccess Modify
+    Set-CompanionPathPermissions -Path (Join-Path $publicRoot 'InteractiveCapture') -UsersAccess Modify
 }
 
 function Ensure-RemoteControlFirewallRule {
@@ -279,7 +288,7 @@ try {
     sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/30000 | Out-Null
     reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\$serviceName" /v DelayedAutostart /t REG_DWORD /d 1 /f | Out-Null
     Ensure-ServiceWatchdogTasks -ServiceName $serviceName
-    Protect-CompanionStorage -InstallDirectory $InstallDirectory
+    Set-CompanionStoragePermissions -InstallDirectory $InstallDirectory
     Ensure-RemoteControlFirewallRule
 
     Start-Service -Name $serviceName -ErrorAction SilentlyContinue | Out-Null

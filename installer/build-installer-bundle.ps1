@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = 'Release',
-    [string]$Version = '0.1.23'
+    [string]$Version = '0.1.27'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +36,9 @@ Copy-Item -Path (Join-Path $sourceDirectory 'air_companion_tray.exe') -Destinati
 Copy-Item -Path (Join-Path $sourceDirectory 'air_companion_helper.exe') -Destination $bundleDirectory -Force
 Copy-Item -Path (Join-Path $sourceDirectory 'air_companion_updater.exe') -Destination $bundleDirectory -Force
 Copy-Item -Path (Join-Path $PSScriptRoot 'install-companion.ps1') -Destination (Join-Path $bundleDirectory 'install-companion.ps1') -Force
+if (Test-Path (Join-Path $PSScriptRoot 'repair-companion-permissions.ps1')) {
+    Copy-Item -Path (Join-Path $PSScriptRoot 'repair-companion-permissions.ps1') -Destination (Join-Path $bundleDirectory 'repair-companion-permissions.ps1') -Force
+}
 
 if (Test-Path $bundleZip) {
     Remove-Item -Force $bundleZip

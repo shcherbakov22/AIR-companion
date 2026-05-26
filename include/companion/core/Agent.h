@@ -59,6 +59,7 @@ private:
     adapters::IScreenCaptureAdapter& m_screenCaptureAdapter;
     adapters::ICameraCaptureAdapter& m_cameraCaptureAdapter;
     std::optional<models::DevicePolicy> m_lastPolicy;
+    std::string m_lastLoggedPolicyHash;
     std::vector<models::InstalledAppEntry> m_cachedInstalledApps;
     std::chrono::steady_clock::time_point m_lastInstalledAppsCollectedAt{};
     bool m_hasInstalledAppsCache{false};

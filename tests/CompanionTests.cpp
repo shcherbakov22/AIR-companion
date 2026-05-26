@@ -11,6 +11,7 @@
 #include "companion/service/CompanionConfigStore.h"
 #include "companion/service/EnrollmentRequestStore.h"
 #include "companion/service/TrustedRootInstaller.h"
+#include "companion/support/LocalLog.h"
 
 #include "FakePushUpCounterAdapter.h"
 #include "FakeCompanionApiClient.h"
@@ -152,8 +153,9 @@ public:
         lastSnapshot = snapshot;
     }
 
-    void terminateBlockedApps(const std::vector<std::string>& blockedApps) override {
+    std::vector<std::string> terminateBlockedApps(const std::vector<std::string>& blockedApps) override {
         terminatedBlockedApps = blockedApps;
+        return terminateBlockedAppFailures;
     }
 
     bool showMessage(const std::string& title, const std::string& body, int displaySeconds, std::string& error) override {
@@ -177,12 +179,31 @@ public:
     companion::models::DevicePolicy lastPolicy{};
     companion::models::ActivitySnapshot lastSnapshot{};
     std::vector<std::string> terminatedBlockedApps;
+    std::vector<std::string> terminateBlockedAppFailures;
     int showMessageCallCount{0};
     int lastDisplaySeconds{0};
     bool messageShouldSucceed{true};
     std::string lastMessageTitle;
     std::string lastMessageBody;
 };
+
+void testLocalLogWritesTimestampedDebugLogToOverrideDirectory() {
+    ScopedTempDir tempDir;
+    ScopedEnvVar logDir("AIR_COMPANION_LOG_DIR", tempDir.path().string());
+
+    companion::support::appendDebugLog("local logging smoke test");
+
+    const auto logPath = tempDir.path() / "debug.log";
+    require(fs::exists(logPath), "debug log should be created in override directory");
+
+    std::ifstream input(logPath);
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    const auto contents = buffer.str();
+
+    require(contents.find("local logging smoke test") != std::string::npos, "debug log should contain message");
+    require(contents.find("-") != std::string::npos && contents.find(":") != std::string::npos, "debug log should include timestamp");
+}
 
 // ---------------------------------------------------------------------------
 // CompanionApiParsers — enrollment edge cases
@@ -1627,6 +1648,7 @@ int main() {
         {"enforcementCoordinatorPassesSnapshotToAdapter", testEnforcementCoordinatorPassesSnapshotToAdapter},
         {"enforcementCoordinatorShowMessageCommand",   testEnforcementCoordinatorShowMessageCommand},
         {"enforcementCoordinatorShowMessageCommandRequiresBody", testEnforcementCoordinatorShowMessageCommandRequiresBody},
+        {"localLogWritesTimestampedDebugLogToOverrideDirectory", testLocalLogWritesTimestampedDebugLogToOverrideDirectory},
 
         // New trusted root URL tests
         {"trustedRootInstallerTrailingSlashPreserved", testTrustedRootInstallerTrailingSlashPreserved},

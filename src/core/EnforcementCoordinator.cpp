@@ -62,9 +62,9 @@ int jsonIntValue(const std::string& body, const std::string& key, int fallback) 
 EnforcementCoordinator::EnforcementCoordinator(adapters::IEnforcementAdapter& enforcementAdapter)
     : m_enforcementAdapter(enforcementAdapter) {}
 
-void EnforcementCoordinator::applyPolicy(const models::DevicePolicy& policy, const models::ActivitySnapshot& snapshot) {
+std::vector<std::string> EnforcementCoordinator::applyPolicy(const models::DevicePolicy& policy, const models::ActivitySnapshot& snapshot) {
     m_enforcementAdapter.applyPolicy(policy, snapshot);
-    m_enforcementAdapter.terminateBlockedApps(policy.blockedApps);
+    return m_enforcementAdapter.terminateBlockedApps(policy.blockedApps);
 }
 
 EnforcementCoordinator::CommandExecutionResult EnforcementCoordinator::applyCommand(const models::DeviceCommand& command) {

@@ -55,6 +55,7 @@ public:
         const std::string& networkState) const;
     bool sendActivity(const std::string& deviceToken, const models::ActivitySnapshot& snapshot) const;
     bool sendInstalledApps(const std::string& deviceToken, const std::vector<models::InstalledAppEntry>& apps) const;
+    bool sendAppEnforcementReport(const std::string& deviceToken, const std::vector<std::string>& failures) const;
     bool uploadScreenCapture(const std::string& deviceToken,
                              const std::string& filePath,
                              const models::ActivitySnapshot& snapshot,
