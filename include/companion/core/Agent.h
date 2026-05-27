@@ -62,6 +62,7 @@ private:
     std::string m_lastLoggedPolicyHash;
     std::vector<models::InstalledAppEntry> m_cachedInstalledApps;
     std::chrono::steady_clock::time_point m_lastInstalledAppsCollectedAt{};
+    std::chrono::steady_clock::time_point m_lastHotspotEnforcedAt{};
     bool m_hasInstalledAppsCache{false};
     bool m_running{false};
     std::string m_status{"idle"};

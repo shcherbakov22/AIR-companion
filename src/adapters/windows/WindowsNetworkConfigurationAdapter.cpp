@@ -1,4 +1,5 @@
 #include "companion/adapters/windows/WindowsAdapters.h"
+#include "companion/support/LocalLog.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -82,6 +83,122 @@ bool isUsableAdapter(const IP_ADAPTER_ADDRESSES& adapter) {
     return adapter.FirstUnicastAddress != nullptr;
 }
 
+std::string lastErrorString(const std::string& prefix, DWORD error) {
+    std::ostringstream out;
+    out << prefix << " error=" << error;
+    return out.str();
+}
+
+bool setMobileHotspotPolicyDisabled() {
+    HKEY key{};
+    const auto result = RegCreateKeyExW(
+        HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Policies\\Microsoft\\Windows\\Network Connections",
+        0,
+        nullptr,
+        REG_OPTION_NON_VOLATILE,
+        KEY_SET_VALUE,
+        nullptr,
+        &key,
+        nullptr
+    );
+
+    if (result != ERROR_SUCCESS) {
+        companion::support::appendDebugLog(lastErrorString("hotspot policy registry open failed", result));
+        return false;
+    }
+
+    const DWORD disabled = 0;
+    const auto setResult = RegSetValueExW(
+        key,
+        L"NC_ShowSharedAccessUI",
+        0,
+        REG_DWORD,
+        reinterpret_cast<const BYTE*>(&disabled),
+        sizeof(disabled)
+    );
+    RegCloseKey(key);
+
+    if (setResult != ERROR_SUCCESS) {
+        companion::support::appendDebugLog(lastErrorString("hotspot policy registry write failed", setResult));
+        return false;
+    }
+
+    return true;
+}
+
+bool stopAndDisableService(const wchar_t* serviceName, const char* logName) {
+    SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (manager == nullptr) {
+        companion::support::appendDebugLog(lastErrorString(std::string("hotspot service manager open failed service=") + logName, GetLastError()));
+        return false;
+    }
+
+    SC_HANDLE service = OpenServiceW(
+        manager,
+        serviceName,
+        SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_CHANGE_CONFIG
+    );
+
+    if (service == nullptr) {
+        const auto error = GetLastError();
+        CloseServiceHandle(manager);
+        if (error == ERROR_SERVICE_DOES_NOT_EXIST) {
+            companion::support::appendDebugLog(std::string("hotspot service missing service=") + logName);
+            return true;
+        }
+
+        companion::support::appendDebugLog(lastErrorString(std::string("hotspot service open failed service=") + logName, error));
+        return false;
+    }
+
+    bool ok = true;
+    if (!ChangeServiceConfigW(
+            service,
+            SERVICE_NO_CHANGE,
+            SERVICE_DISABLED,
+            SERVICE_NO_CHANGE,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr
+        )) {
+        companion::support::appendDebugLog(lastErrorString(std::string("hotspot service disable failed service=") + logName, GetLastError()));
+        ok = false;
+    }
+
+    SERVICE_STATUS_PROCESS status{};
+    DWORD bytesNeeded = 0;
+    if (QueryServiceStatusEx(
+            service,
+            SC_STATUS_PROCESS_INFO,
+            reinterpret_cast<LPBYTE>(&status),
+            sizeof(status),
+            &bytesNeeded
+        )) {
+        if (status.dwCurrentState != SERVICE_STOPPED && status.dwCurrentState != SERVICE_STOP_PENDING) {
+            SERVICE_STATUS stopStatus{};
+            if (!ControlService(service, SERVICE_CONTROL_STOP, &stopStatus)) {
+                const auto error = GetLastError();
+                if (error != ERROR_SERVICE_NOT_ACTIVE) {
+                    companion::support::appendDebugLog(lastErrorString(std::string("hotspot service stop failed service=") + logName, error));
+                    ok = false;
+                }
+            }
+        }
+    } else {
+        companion::support::appendDebugLog(lastErrorString(std::string("hotspot service status failed service=") + logName, GetLastError()));
+        ok = false;
+    }
+
+    CloseServiceHandle(service);
+    CloseServiceHandle(manager);
+    return ok;
+}
+
 #endif
 
 }  // namespace
@@ -114,6 +231,25 @@ bool WindowsNetworkConfigurationAdapter::restorePreviousConfiguration() {
     m_currentIdentity.configuredThroughAirGateway = false;
     m_state = "network passthrough";
     return true;
+}
+
+bool WindowsNetworkConfigurationAdapter::enforceHotspotDisabled() {
+#ifdef _WIN32
+    const bool registryOk = setMobileHotspotPolicyDisabled();
+    const bool hotspotServiceOk = stopAndDisableService(L"icssvc", "icssvc");
+    const bool sharingServiceOk = stopAndDisableService(L"SharedAccess", "SharedAccess");
+    const bool ok = registryOk && hotspotServiceOk && sharingServiceOk;
+
+    m_state = ok ? "network passthrough; hotspot disabled" : "network passthrough; hotspot hardening failed";
+    if (ok && !m_hotspotHardeningSuccessLogged) {
+        companion::support::appendDebugLog("network hardening ok: mobile hotspot and ICS disabled");
+        m_hotspotHardeningSuccessLogged = true;
+    }
+
+    return ok;
+#else
+    return true;
+#endif
 }
 
 std::string WindowsNetworkConfigurationAdapter::describeState() const {

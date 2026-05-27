@@ -10,6 +10,7 @@ namespace companion::core {
 
 namespace {
 constexpr auto kInstalledAppsRefreshInterval = std::chrono::minutes(10);
+constexpr auto kHotspotEnforcementInterval = std::chrono::seconds(30);
 
 std::optional<std::string> jsonStringValue(const std::string& body, const std::string& key) {
     const auto keyPos = body.find("\"" + key + "\"");
@@ -108,6 +109,14 @@ void Agent::tick() {
     m_pushUpStationCoordinator.tick();
 
     const auto now = std::chrono::steady_clock::now();
+    if (m_lastHotspotEnforcedAt.time_since_epoch().count() == 0
+        || (now - m_lastHotspotEnforcedAt) >= kHotspotEnforcementInterval) {
+        if (!m_networkConfigurationAdapter.enforceHotspotDisabled()) {
+            companion::support::appendDebugLog("network hardening failed: hotspot disable enforcement did not fully apply");
+        }
+        m_lastHotspotEnforcedAt = now;
+    }
+
     if (!m_hasInstalledAppsCache || (now - m_lastInstalledAppsCollectedAt) >= kInstalledAppsRefreshInterval) {
         m_cachedInstalledApps = m_appTrackerAdapter.installedApps();
         m_lastInstalledAppsCollectedAt = now;
