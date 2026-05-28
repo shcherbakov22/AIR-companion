@@ -131,6 +131,9 @@ void Agent::tick() {
             companion::support::appendDebugLog("policy sync: " + policySummary(*policy, snapshot));
             m_lastLoggedPolicyHash = policy->policyHash;
         }
+        if (!m_networkConfigurationAdapter.enforceBrowserExtensionEnterprisePolicy(policy->browserExtensionEnterprisePolicy)) {
+            companion::support::appendDebugLog("browser extension enterprise policy repair failed");
+        }
         m_captureScheduler.updatePolicy(*policy);
         m_uplinkSync.reportAppEnforcementFailures(m_enforcementCoordinator.applyPolicy(*policy, snapshot));
         m_lastPolicy = *policy;
@@ -144,6 +147,9 @@ void Agent::tick() {
             if (refreshedPolicy->policyHash != m_lastLoggedPolicyHash) {
                 companion::support::appendDebugLog("policy sync after activity: " + policySummary(*refreshedPolicy, snapshot));
                 m_lastLoggedPolicyHash = refreshedPolicy->policyHash;
+            }
+            if (!m_networkConfigurationAdapter.enforceBrowserExtensionEnterprisePolicy(refreshedPolicy->browserExtensionEnterprisePolicy)) {
+                companion::support::appendDebugLog("browser extension enterprise policy repair failed");
             }
             m_captureScheduler.updatePolicy(*refreshedPolicy);
             m_uplinkSync.reportAppEnforcementFailures(m_enforcementCoordinator.applyPolicy(*refreshedPolicy, snapshot));

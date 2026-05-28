@@ -17,6 +17,15 @@ struct DevicePolicy {
         int browserReopenGraceSeconds{60};
     };
 
+    struct BrowserExtensionEnterprisePolicy {
+        bool enabled{false};
+        std::string extensionId;
+        std::string updateUrl;
+        std::string platformUrl;
+        std::string deviceToken;
+        std::string chromeEnterpriseEnrollmentToken;
+    };
+
     std::string policyHash;
     std::string studentDisplayName;
     std::string activeScheduleName;
@@ -33,6 +42,7 @@ struct DevicePolicy {
     std::vector<std::string> allowedDomains;
     std::vector<std::string> blockedApps;
     ViolationAppEnforcement violationAppEnforcement{};
+    BrowserExtensionEnterprisePolicy browserExtensionEnterprisePolicy{};
 };
 
 }  // namespace companion::models

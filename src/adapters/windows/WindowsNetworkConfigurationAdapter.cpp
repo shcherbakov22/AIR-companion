@@ -38,6 +38,22 @@ std::string wideToUtf8(const wchar_t* value) {
     return output;
 }
 
+std::wstring utf8ToWide(const std::string& value) {
+    if (value.empty()) {
+        return {};
+    }
+
+    const auto required = MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, nullptr, 0);
+    if (required <= 1) {
+        return {};
+    }
+
+    std::wstring output(static_cast<std::size_t>(required), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, output.data(), required);
+    output.resize(static_cast<std::size_t>(required - 1));
+    return output;
+}
+
 std::string sockaddrToIpv4String(const SOCKADDR* address) {
     if (address == nullptr || address->sa_family != AF_INET) {
         return {};
@@ -125,6 +141,60 @@ bool setMobileHotspotPolicyDisabled() {
     }
 
     return true;
+}
+
+bool setRegistryStringValue(const std::wstring& path, const std::wstring& name, const std::string& value) {
+    HKEY key{};
+    const auto result = RegCreateKeyExW(
+        HKEY_LOCAL_MACHINE,
+        path.c_str(),
+        0,
+        nullptr,
+        REG_OPTION_NON_VOLATILE,
+        KEY_SET_VALUE,
+        nullptr,
+        &key,
+        nullptr
+    );
+
+    if (result != ERROR_SUCCESS) {
+        companion::support::appendDebugLog(lastErrorString("browser extension policy registry open failed", result));
+        return false;
+    }
+
+    const auto wideValue = utf8ToWide(value);
+    const auto byteCount = static_cast<DWORD>((wideValue.size() + 1) * sizeof(wchar_t));
+    const auto setResult = RegSetValueExW(
+        key,
+        name.c_str(),
+        0,
+        REG_SZ,
+        reinterpret_cast<const BYTE*>(wideValue.c_str()),
+        byteCount
+    );
+    RegCloseKey(key);
+
+    if (setResult != ERROR_SUCCESS) {
+        companion::support::appendDebugLog(lastErrorString("browser extension policy registry write failed", setResult));
+        return false;
+    }
+
+    return true;
+}
+
+bool setBrowserExtensionManagedPolicy(
+    const std::wstring& browserPolicyRoot,
+    const std::string& extensionId,
+    const std::string& platformUrl,
+    const std::string& deviceToken) {
+    const auto extensionIdWide = utf8ToWide(extensionId);
+    if (extensionIdWide.empty()) {
+        return false;
+    }
+
+    const auto policyRoot = browserPolicyRoot + L"\\3rdparty\\extensions\\" + extensionIdWide + L"\\policy";
+    return setRegistryStringValue(policyRoot, L"platformUrl", platformUrl)
+        && setRegistryStringValue(policyRoot, L"deviceToken", deviceToken);
 }
 
 bool stopAndDisableService(const wchar_t* serviceName, const char* logName) {
@@ -248,6 +318,65 @@ bool WindowsNetworkConfigurationAdapter::enforceHotspotDisabled() {
 
     return ok;
 #else
+    return true;
+#endif
+}
+
+bool WindowsNetworkConfigurationAdapter::enforceBrowserExtensionEnterprisePolicy(
+    const models::DevicePolicy::BrowserExtensionEnterprisePolicy& policy) {
+#ifdef _WIN32
+    if (!policy.enabled) {
+        return true;
+    }
+
+    if (policy.extensionId.empty() || policy.updateUrl.empty() || policy.platformUrl.empty() || policy.deviceToken.empty()) {
+        companion::support::appendDebugLog("browser extension policy repair skipped: incomplete policy");
+        return false;
+    }
+
+    const auto forceInstallValue = policy.extensionId + ";" + policy.updateUrl;
+    bool ok = true;
+
+    if (!policy.chromeEnterpriseEnrollmentToken.empty()) {
+        ok = setRegistryStringValue(
+            L"SOFTWARE\\Policies\\Google\\Chrome",
+            L"CloudManagementEnrollmentToken",
+            policy.chromeEnterpriseEnrollmentToken
+        ) && ok;
+    }
+
+    ok = setRegistryStringValue(
+        L"SOFTWARE\\Policies\\Google\\Chrome\\ExtensionInstallForcelist",
+        L"1",
+        forceInstallValue
+    ) && ok;
+    ok = setRegistryStringValue(
+        L"SOFTWARE\\Policies\\Microsoft\\Edge\\ExtensionInstallForcelist",
+        L"1",
+        forceInstallValue
+    ) && ok;
+
+    ok = setBrowserExtensionManagedPolicy(
+        L"SOFTWARE\\Policies\\Google\\Chrome",
+        policy.extensionId,
+        policy.platformUrl,
+        policy.deviceToken
+    ) && ok;
+    ok = setBrowserExtensionManagedPolicy(
+        L"SOFTWARE\\Policies\\Microsoft\\Edge",
+        policy.extensionId,
+        policy.platformUrl,
+        policy.deviceToken
+    ) && ok;
+
+    if (ok && !m_browserExtensionPolicySuccessLogged) {
+        companion::support::appendDebugLog("browser extension policy repair ok: Chrome/Edge force install and managed config present");
+        m_browserExtensionPolicySuccessLogged = true;
+    }
+
+    return ok;
+#else
+    (void) policy;
     return true;
 #endif
 }

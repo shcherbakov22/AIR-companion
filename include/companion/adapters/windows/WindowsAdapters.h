@@ -102,6 +102,8 @@ public:
     bool ensureAirGateway(const std::string& gatewayIpv4, const std::string& dnsIpv4) override;
     bool restorePreviousConfiguration() override;
     bool enforceHotspotDisabled() override;
+    bool enforceBrowserExtensionEnterprisePolicy(
+        const models::DevicePolicy::BrowserExtensionEnterprisePolicy& policy) override;
     std::string describeState() const override;
 
 private:
@@ -116,6 +118,7 @@ private:
     std::optional<models::NetworkIdentity> m_originalIdentity;
     std::string m_state{"network passthrough"};
     bool m_hotspotHardeningSuccessLogged{false};
+    bool m_browserExtensionPolicySuccessLogged{false};
 };
 
 class WindowsPushUpCounterAdapter final : public IPushUpCounterAdapter {

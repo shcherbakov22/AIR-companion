@@ -337,6 +337,30 @@ void testParsePolicyResponseViolationAppEnforcement() {
     requireEqual(result->violationAppEnforcement.browserReopenGraceSeconds, 60, "browser grace should parse");
 }
 
+void testParsePolicyResponseBrowserExtensionEnterprisePolicy() {
+    const auto body = R"({
+        "policy_hash": "h7",
+        "policy": {
+            "browser_extension_enterprise_policy": {
+                "enabled": true,
+                "extension_id": "cccijfadcaffnndbpdfdhbncehedgkhb",
+                "update_url": "https://192.168.11.228/companion/downloads/chrome/extension-updates.xml",
+                "platform_url": "https://192.168.11.228",
+                "device_token": "extension-token",
+                "chrome_enterprise_enrollment_token": "enterprise-token"
+            }
+        }
+    })";
+    const auto result = companion::networking::parsePolicyResponse(body);
+    require(result.has_value(), "should parse browser extension enterprise policy");
+    require(result->browserExtensionEnterprisePolicy.enabled, "enterprise policy should be enabled");
+    requireEqual(result->browserExtensionEnterprisePolicy.extensionId, std::string("cccijfadcaffnndbpdfdhbncehedgkhb"), "extension id");
+    requireEqual(result->browserExtensionEnterprisePolicy.updateUrl, std::string("https://192.168.11.228/companion/downloads/chrome/extension-updates.xml"), "update url");
+    requireEqual(result->browserExtensionEnterprisePolicy.platformUrl, std::string("https://192.168.11.228"), "platform url");
+    requireEqual(result->browserExtensionEnterprisePolicy.deviceToken, std::string("extension-token"), "device token");
+    requireEqual(result->browserExtensionEnterprisePolicy.chromeEnterpriseEnrollmentToken, std::string("enterprise-token"), "enterprise token");
+}
+
 // ---------------------------------------------------------------------------
 // CompanionApiParsers — command parsing edge cases
 // ---------------------------------------------------------------------------
@@ -1624,6 +1648,7 @@ int main() {
         {"parsePolicyResponseViolationOpenCountZero",  testParsePolicyResponseViolationOpenCountZero},
         {"parsePolicyResponseViolationOpenCountPositive", testParsePolicyResponseViolationOpenCountPositive},
         {"parsePolicyResponseViolationAppEnforcement", testParsePolicyResponseViolationAppEnforcement},
+        {"parsePolicyResponseBrowserExtensionEnterprisePolicy", testParsePolicyResponseBrowserExtensionEnterprisePolicy},
 
         // New command parser tests (tests 14-18 use command_type values containing "id" as substring — these
         // expose a real bug in jsonIntValue that finds "id" inside "command_type" values. Skipped until

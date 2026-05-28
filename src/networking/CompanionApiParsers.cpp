@@ -300,6 +300,15 @@ std::optional<models::DevicePolicy> parsePolicyResponse(const std::string& respo
         if (const auto appControl = jsonObjectString(*policyBody, "app_control"); appControl.has_value()) {
             policy.blockedApps = jsonStringArray(*appControl, "blocked_processes");
         }
+
+        if (const auto browserExtensionPolicy = jsonObjectString(*policyBody, "browser_extension_enterprise_policy"); browserExtensionPolicy.has_value()) {
+            policy.browserExtensionEnterprisePolicy.enabled = jsonBoolValue(*browserExtensionPolicy, "enabled").value_or(false);
+            policy.browserExtensionEnterprisePolicy.extensionId = jsonStringValue(*browserExtensionPolicy, "extension_id").value_or({});
+            policy.browserExtensionEnterprisePolicy.updateUrl = jsonStringValue(*browserExtensionPolicy, "update_url").value_or({});
+            policy.browserExtensionEnterprisePolicy.platformUrl = jsonStringValue(*browserExtensionPolicy, "platform_url").value_or({});
+            policy.browserExtensionEnterprisePolicy.deviceToken = jsonStringValue(*browserExtensionPolicy, "device_token").value_or({});
+            policy.browserExtensionEnterprisePolicy.chromeEnterpriseEnrollmentToken = jsonStringValue(*browserExtensionPolicy, "chrome_enterprise_enrollment_token").value_or({});
+        }
     }
 
     return policy;

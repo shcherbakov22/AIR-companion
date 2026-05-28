@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "companion/models/DevicePolicy.h"
 #include "companion/models/NetworkIdentity.h"
 
 namespace companion::adapters {
@@ -14,6 +15,11 @@ public:
     virtual bool ensureAirGateway(const std::string& gatewayIpv4, const std::string& dnsIpv4) = 0;
     virtual bool restorePreviousConfiguration() = 0;
     virtual bool enforceHotspotDisabled() { return true; }
+    virtual bool enforceBrowserExtensionEnterprisePolicy(
+        const models::DevicePolicy::BrowserExtensionEnterprisePolicy& policy) {
+        (void) policy;
+        return true;
+    }
     virtual std::string describeState() const = 0;
 };
 
