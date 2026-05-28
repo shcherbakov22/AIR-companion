@@ -23,6 +23,11 @@ std::string normalizeProcessName(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
     });
+
+    if (value == "new_chrome.exe") {
+        return "chrome.exe";
+    }
+
     return value;
 }
 
