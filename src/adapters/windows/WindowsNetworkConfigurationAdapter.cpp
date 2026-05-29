@@ -151,7 +151,7 @@ bool setRegistryStringValue(const std::wstring& path, const std::wstring& name, 
         0,
         nullptr,
         REG_OPTION_NON_VOLATILE,
-        KEY_SET_VALUE,
+        KEY_SET_VALUE | KEY_WOW64_64KEY,
         nullptr,
         &key,
         nullptr
@@ -180,6 +180,57 @@ bool setRegistryStringValue(const std::wstring& path, const std::wstring& name, 
     }
 
     return true;
+}
+
+std::string jsonEscape(const std::string& value) {
+    std::ostringstream out;
+    for (const unsigned char character : value) {
+        switch (character) {
+            case '"':
+                out << "\\\"";
+                break;
+            case '\\':
+                out << "\\\\";
+                break;
+            case '\b':
+                out << "\\b";
+                break;
+            case '\f':
+                out << "\\f";
+                break;
+            case '\n':
+                out << "\\n";
+                break;
+            case '\r':
+                out << "\\r";
+                break;
+            case '\t':
+                out << "\\t";
+                break;
+            default:
+                if (character < 0x20) {
+                    out << "\\u";
+                    out.width(4);
+                    out.fill('0');
+                    out << std::hex << std::nouppercase << static_cast<int>(character);
+                } else {
+                    out << static_cast<char>(character);
+                }
+                break;
+        }
+    }
+
+    return out.str();
+}
+
+std::string browserExtensionSettingsJson(const std::string& extensionId, const std::string& updateUrl) {
+    std::ostringstream out;
+    out << "{\"" << jsonEscape(extensionId) << "\":{"
+        << "\"installation_mode\":\"force_installed\","
+        << "\"toolbar_pin\":\"force_pinned\","
+        << "\"update_url\":\"" << jsonEscape(updateUrl) << "\""
+        << "}}";
+    return out.str();
 }
 
 bool setBrowserExtensionManagedPolicy(
@@ -356,6 +407,18 @@ bool WindowsNetworkConfigurationAdapter::enforceBrowserExtensionEnterprisePolicy
         forceInstallValue
     ) && ok;
 
+    const auto extensionSettings = browserExtensionSettingsJson(policy.extensionId, policy.updateUrl);
+    ok = setRegistryStringValue(
+        L"SOFTWARE\\Policies\\Google\\Chrome",
+        L"ExtensionSettings",
+        extensionSettings
+    ) && ok;
+    ok = setRegistryStringValue(
+        L"SOFTWARE\\Policies\\Microsoft\\Edge",
+        L"ExtensionSettings",
+        extensionSettings
+    ) && ok;
+
     ok = setBrowserExtensionManagedPolicy(
         L"SOFTWARE\\Policies\\Google\\Chrome",
         policy.extensionId,
@@ -370,7 +433,7 @@ bool WindowsNetworkConfigurationAdapter::enforceBrowserExtensionEnterprisePolicy
     ) && ok;
 
     if (ok && !m_browserExtensionPolicySuccessLogged) {
-        companion::support::appendDebugLog("browser extension policy repair ok: Chrome/Edge force install and managed config present");
+        companion::support::appendDebugLog("browser extension policy repair ok: Chrome/Edge force install, ExtensionSettings, and managed config present");
         m_browserExtensionPolicySuccessLogged = true;
     }
 
