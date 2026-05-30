@@ -182,6 +182,85 @@ bool setRegistryStringValue(const std::wstring& path, const std::wstring& name, 
     return true;
 }
 
+bool readRegistryStringValue(const std::wstring& path, const std::wstring& name, std::string& value) {
+    HKEY key{};
+    const auto openResult = RegOpenKeyExW(
+        HKEY_LOCAL_MACHINE,
+        path.c_str(),
+        0,
+        KEY_QUERY_VALUE | KEY_WOW64_64KEY,
+        &key
+    );
+
+    if (openResult != ERROR_SUCCESS) {
+        return false;
+    }
+
+    DWORD type = 0;
+    DWORD byteCount = 0;
+    auto queryResult = RegQueryValueExW(key, name.c_str(), nullptr, &type, nullptr, &byteCount);
+    if (queryResult != ERROR_SUCCESS || type != REG_SZ || byteCount == 0) {
+        RegCloseKey(key);
+        return false;
+    }
+
+    std::wstring wideValue(byteCount / sizeof(wchar_t), L'\0');
+    queryResult = RegQueryValueExW(
+        key,
+        name.c_str(),
+        nullptr,
+        &type,
+        reinterpret_cast<BYTE*>(wideValue.data()),
+        &byteCount
+    );
+    RegCloseKey(key);
+
+    if (queryResult != ERROR_SUCCESS || wideValue.empty()) {
+        return false;
+    }
+
+    if (wideValue.back() == L'\0') {
+        wideValue.pop_back();
+    }
+
+    value = wideToUtf8(wideValue.c_str());
+    return true;
+}
+
+bool deleteRegistryValue(const std::wstring& path, const std::wstring& name) {
+    HKEY key{};
+    const auto openResult = RegOpenKeyExW(
+        HKEY_LOCAL_MACHINE,
+        path.c_str(),
+        0,
+        KEY_SET_VALUE | KEY_WOW64_64KEY,
+        &key
+    );
+
+    if (openResult == ERROR_FILE_NOT_FOUND) {
+        return true;
+    }
+
+    if (openResult != ERROR_SUCCESS) {
+        companion::support::appendDebugLog(lastErrorString("browser extension policy registry delete open failed", openResult));
+        return false;
+    }
+
+    const auto deleteResult = RegDeleteValueW(key, name.c_str());
+    RegCloseKey(key);
+
+    if (deleteResult == ERROR_FILE_NOT_FOUND) {
+        return true;
+    }
+
+    if (deleteResult != ERROR_SUCCESS) {
+        companion::support::appendDebugLog(lastErrorString("browser extension policy registry delete failed", deleteResult));
+        return false;
+    }
+
+    return true;
+}
+
 std::string jsonEscape(const std::string& value) {
     std::ostringstream out;
     for (const unsigned char character : value) {
@@ -246,6 +325,32 @@ bool setBrowserExtensionManagedPolicy(
     const auto policyRoot = browserPolicyRoot + L"\\3rdparty\\extensions\\" + extensionIdWide + L"\\policy";
     return setRegistryStringValue(policyRoot, L"platformUrl", platformUrl)
         && setRegistryStringValue(policyRoot, L"deviceToken", deviceToken);
+}
+
+bool clearLocalBrowserExtensionInstallPolicy(
+    const std::wstring& browserPolicyRoot,
+    const std::string& extensionId,
+    const std::string& updateUrl) {
+    const auto forceListRoot = browserPolicyRoot + L"\\ExtensionInstallForcelist";
+    const auto expectedForceInstallValue = extensionId + ";" + updateUrl;
+    bool ok = true;
+
+    for (int index = 1; index <= 20; ++index) {
+        std::string currentValue;
+        const auto valueName = std::to_wstring(index);
+        if (readRegistryStringValue(forceListRoot, valueName, currentValue)
+            && currentValue == expectedForceInstallValue) {
+            ok = deleteRegistryValue(forceListRoot, valueName) && ok;
+        }
+    }
+
+    std::string extensionSettings;
+    if (readRegistryStringValue(browserPolicyRoot, L"ExtensionSettings", extensionSettings)
+        && extensionSettings.find(extensionId) != std::string::npos) {
+        ok = deleteRegistryValue(browserPolicyRoot, L"ExtensionSettings") && ok;
+    }
+
+    return ok;
 }
 
 bool stopAndDisableService(const wchar_t* serviceName, const char* logName) {
@@ -385,39 +490,51 @@ bool WindowsNetworkConfigurationAdapter::enforceBrowserExtensionEnterprisePolicy
         return false;
     }
 
-    const auto forceInstallValue = policy.extensionId + ";" + policy.updateUrl;
     bool ok = true;
+    const bool useCloudInstallPolicy = !policy.chromeEnterpriseEnrollmentToken.empty();
 
-    if (!policy.chromeEnterpriseEnrollmentToken.empty()) {
+    if (useCloudInstallPolicy) {
         ok = setRegistryStringValue(
             L"SOFTWARE\\Policies\\Google\\Chrome",
             L"CloudManagementEnrollmentToken",
             policy.chromeEnterpriseEnrollmentToken
         ) && ok;
+
+        ok = clearLocalBrowserExtensionInstallPolicy(
+            L"SOFTWARE\\Policies\\Google\\Chrome",
+            policy.extensionId,
+            policy.updateUrl
+        ) && ok;
+        ok = clearLocalBrowserExtensionInstallPolicy(
+            L"SOFTWARE\\Policies\\Microsoft\\Edge",
+            policy.extensionId,
+            policy.updateUrl
+        ) && ok;
+    } else {
+        const auto forceInstallValue = policy.extensionId + ";" + policy.updateUrl;
+        ok = setRegistryStringValue(
+            L"SOFTWARE\\Policies\\Google\\Chrome\\ExtensionInstallForcelist",
+            L"1",
+            forceInstallValue
+        ) && ok;
+        ok = setRegistryStringValue(
+            L"SOFTWARE\\Policies\\Microsoft\\Edge\\ExtensionInstallForcelist",
+            L"1",
+            forceInstallValue
+        ) && ok;
+
+        const auto extensionSettings = browserExtensionSettingsJson(policy.extensionId, policy.updateUrl);
+        ok = setRegistryStringValue(
+            L"SOFTWARE\\Policies\\Google\\Chrome",
+            L"ExtensionSettings",
+            extensionSettings
+        ) && ok;
+        ok = setRegistryStringValue(
+            L"SOFTWARE\\Policies\\Microsoft\\Edge",
+            L"ExtensionSettings",
+            extensionSettings
+        ) && ok;
     }
-
-    ok = setRegistryStringValue(
-        L"SOFTWARE\\Policies\\Google\\Chrome\\ExtensionInstallForcelist",
-        L"1",
-        forceInstallValue
-    ) && ok;
-    ok = setRegistryStringValue(
-        L"SOFTWARE\\Policies\\Microsoft\\Edge\\ExtensionInstallForcelist",
-        L"1",
-        forceInstallValue
-    ) && ok;
-
-    const auto extensionSettings = browserExtensionSettingsJson(policy.extensionId, policy.updateUrl);
-    ok = setRegistryStringValue(
-        L"SOFTWARE\\Policies\\Google\\Chrome",
-        L"ExtensionSettings",
-        extensionSettings
-    ) && ok;
-    ok = setRegistryStringValue(
-        L"SOFTWARE\\Policies\\Microsoft\\Edge",
-        L"ExtensionSettings",
-        extensionSettings
-    ) && ok;
 
     ok = setBrowserExtensionManagedPolicy(
         L"SOFTWARE\\Policies\\Google\\Chrome",
@@ -433,7 +550,11 @@ bool WindowsNetworkConfigurationAdapter::enforceBrowserExtensionEnterprisePolicy
     ) && ok;
 
     if (ok && !m_browserExtensionPolicySuccessLogged) {
-        companion::support::appendDebugLog("browser extension policy repair ok: Chrome/Edge force install, ExtensionSettings, and managed config present");
+        companion::support::appendDebugLog(
+            useCloudInstallPolicy
+                ? "browser extension policy repair ok: Chrome Enterprise Core token and managed config present; local force install cleared"
+                : "browser extension policy repair ok: Chrome/Edge force install, ExtensionSettings, and managed config present"
+        );
         m_browserExtensionPolicySuccessLogged = true;
     }
 
