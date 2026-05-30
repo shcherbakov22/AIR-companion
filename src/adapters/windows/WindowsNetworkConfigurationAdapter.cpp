@@ -261,6 +261,20 @@ bool deleteRegistryValue(const std::wstring& path, const std::wstring& name) {
     return true;
 }
 
+bool deleteRegistryTree(const std::wstring& path) {
+    const auto deleteResult = RegDeleteTreeW(HKEY_LOCAL_MACHINE, path.c_str());
+    if (deleteResult == ERROR_FILE_NOT_FOUND) {
+        return true;
+    }
+
+    if (deleteResult != ERROR_SUCCESS) {
+        companion::support::appendDebugLog(lastErrorString("browser extension policy registry tree delete failed", deleteResult));
+        return false;
+    }
+
+    return true;
+}
+
 std::string jsonEscape(const std::string& value) {
     std::ostringstream out;
     for (const unsigned char character : value) {
@@ -343,6 +357,8 @@ bool clearLocalBrowserExtensionInstallPolicy(
             ok = deleteRegistryValue(forceListRoot, valueName) && ok;
         }
     }
+
+    ok = deleteRegistryTree(forceListRoot) && ok;
 
     std::string extensionSettings;
     if (readRegistryStringValue(browserPolicyRoot, L"ExtensionSettings", extensionSettings)
