@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(AIRCompanion VERSION 0.1.37 LANGUAGES CXX)
+project(AIRCompanion VERSION 0.1.38 LANGUAGES CXX)
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 

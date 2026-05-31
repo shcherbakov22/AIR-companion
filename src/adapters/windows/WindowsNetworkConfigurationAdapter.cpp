@@ -543,17 +543,19 @@ bool WindowsNetworkConfigurationAdapter::enforceBrowserExtensionEnterprisePolicy
         ) && ok;
     }
 
-    const auto extensionSettings = browserExtensionSettingsJson(policy.extensionId, policy.updateUrl);
-    ok = setRegistryStringValue(
-        L"SOFTWARE\\Policies\\Google\\Chrome",
-        L"ExtensionSettings",
-        extensionSettings
-    ) && ok;
-    ok = setRegistryStringValue(
-        L"SOFTWARE\\Policies\\Microsoft\\Edge",
-        L"ExtensionSettings",
-        extensionSettings
-    ) && ok;
+    if (!useCloudInstallPolicy) {
+        const auto extensionSettings = browserExtensionSettingsJson(policy.extensionId, policy.updateUrl);
+        ok = setRegistryStringValue(
+            L"SOFTWARE\\Policies\\Google\\Chrome",
+            L"ExtensionSettings",
+            extensionSettings
+        ) && ok;
+        ok = setRegistryStringValue(
+            L"SOFTWARE\\Policies\\Microsoft\\Edge",
+            L"ExtensionSettings",
+            extensionSettings
+        ) && ok;
+    }
 
     ok = setBrowserExtensionManagedPolicy(
         L"SOFTWARE\\Policies\\Google\\Chrome",
@@ -571,7 +573,7 @@ bool WindowsNetworkConfigurationAdapter::enforceBrowserExtensionEnterprisePolicy
     if (ok && !m_browserExtensionPolicySuccessLogged) {
         companion::support::appendDebugLog(
             useCloudInstallPolicy
-                ? "browser extension policy repair ok: Chrome Enterprise Core token and managed config present; local force install cleared"
+                ? "browser extension policy repair ok: Chrome Enterprise Core token and managed config present; local install settings cleared"
                 : "browser extension policy repair ok: Chrome/Edge force install, ExtensionSettings, and managed config present"
         );
         m_browserExtensionPolicySuccessLogged = true;
