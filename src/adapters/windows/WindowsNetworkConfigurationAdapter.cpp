@@ -317,9 +317,11 @@ std::string jsonEscape(const std::string& value) {
 }
 
 std::string browserExtensionSettingsJson(const std::string& extensionId, const std::string& updateUrl) {
-    (void) updateUrl;
     std::ostringstream out;
     out << "{\"" << jsonEscape(extensionId) << "\":{"
+        << "\"installation_mode\":\"force_installed\","
+        << "\"toolbar_pin\":\"force_pinned\","
+        << "\"update_url\":\"" << jsonEscape(updateUrl) << "\","
         << "\"file_url_navigation_allowed\":true,"
         << "\"override_update_url\":true,"
         << "\"blocked_permissions\":[]"
