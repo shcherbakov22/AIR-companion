@@ -321,6 +321,9 @@ std::string browserExtensionSettingsJson(const std::string& extensionId, const s
     out << "{\"" << jsonEscape(extensionId) << "\":{"
         << "\"installation_mode\":\"force_installed\","
         << "\"toolbar_pin\":\"force_pinned\","
+        << "\"file_url_navigation_allowed\":true,"
+        << "\"override_update_url\":true,"
+        << "\"blocked_permissions\":[],"
         << "\"update_url\":\"" << jsonEscape(updateUrl) << "\""
         << "}}";
     return out.str();
@@ -538,19 +541,19 @@ bool WindowsNetworkConfigurationAdapter::enforceBrowserExtensionEnterprisePolicy
             L"1",
             forceInstallValue
         ) && ok;
-
-        const auto extensionSettings = browserExtensionSettingsJson(policy.extensionId, policy.updateUrl);
-        ok = setRegistryStringValue(
-            L"SOFTWARE\\Policies\\Google\\Chrome",
-            L"ExtensionSettings",
-            extensionSettings
-        ) && ok;
-        ok = setRegistryStringValue(
-            L"SOFTWARE\\Policies\\Microsoft\\Edge",
-            L"ExtensionSettings",
-            extensionSettings
-        ) && ok;
     }
+
+    const auto extensionSettings = browserExtensionSettingsJson(policy.extensionId, policy.updateUrl);
+    ok = setRegistryStringValue(
+        L"SOFTWARE\\Policies\\Google\\Chrome",
+        L"ExtensionSettings",
+        extensionSettings
+    ) && ok;
+    ok = setRegistryStringValue(
+        L"SOFTWARE\\Policies\\Microsoft\\Edge",
+        L"ExtensionSettings",
+        extensionSettings
+    ) && ok;
 
     ok = setBrowserExtensionManagedPolicy(
         L"SOFTWARE\\Policies\\Google\\Chrome",
